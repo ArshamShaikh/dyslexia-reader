@@ -39,3 +39,32 @@ The app is designed to support learners with dyslexia and reading difficulties b
 ```bash
 npm install
 npx expo start
+
+
+# Project Structure
+
+'''bash
+dyslexia-reader/
+│ App.js
+│ app.json
+│ package.json
+│ README.md
+│
+├── assets/
+│
+└── src/
+    ├── screens/
+    │   ├── HomeScreen.jsx
+    │   ├── ReaderScreen.jsx
+    │   ├── SettingsScreen.jsx
+    │   └── SavedTextsScreen.jsx
+    │
+    ├── services/
+    │   └── ttsService.js
+    │
+    ├── context/
+    │   └── SettingsContext.js
+    │
+    └── utils/
+        └── textHighlighter.js
+
