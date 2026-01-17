@@ -39,11 +39,12 @@ The app is designed to support learners with dyslexia and reading difficulties b
 ```bash
 npm install
 npx expo start
+```
 
 
 # Project Structure
 
-'''bash
+```bash
 dyslexia-reader/
 │ App.js
 │ app.json
@@ -67,4 +68,4 @@ dyslexia-reader/
     │
     └── utils/
         └── textHighlighter.js
-
+```
