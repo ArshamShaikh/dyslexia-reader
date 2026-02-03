@@ -1,52 +1,145 @@
-import { useState } from "react";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import ReaderControls from "../components/ReaderControls";
 import { useSettings } from "../context/SettingsContext";
 import { speakText, stopSpeech } from "../services/ttsService";
-import { splitIntoLines } from "../utils/textParser";
 
 
 export default function ReaderScreen({ route }) {
   const { text = SAMPLE_TEXT } = route.params || {};
-  const lines = splitIntoLines(text);
-  const [currentLineIndex, setCurrentLineIndex] = useState(-1);
-
+  const words = text.split(/\s+/);
+  const [currentWordIndex, setCurrentWordIndex] = useState(-1);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentSpeed, setCurrentSpeed] = useState(1.0);
+  const intervalRef = useRef(null);
+  const scrollViewRef = useRef(null);
 
   const {
     fontFamily,
     fontSize,
     lineHeight,
+    wordSpacing,
+    letterSpacing,
+    textBoxPadding,
+    showTextBox,
     backgroundTheme,
     textColor,
     readingSpeed,
   } = useSettings();
 
+  // Cleanup interval on unmount
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, []);
+
+  const handlePlayPause = () => {
+    if (isPlaying) {
+      handleStop();
+    } else {
+      handlePlay();
+    }
+  };
+
   const handlePlay = () => {
-    speakText(text, readingSpeed);
-    startHighlighting();
+    try {
+      setIsPlaying(true);
+      speakText(text, readingSpeed);
+      startHighlighting();
+    } catch (error) {
+      console.error("Error during playback:", error);
+      setIsPlaying(false);
+    }
   };
 
   const handleStop = () => {
-    stopSpeech();
-    stopHighlighting();
+    try {
+      stopSpeech();
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      setIsPlaying(false);
+      // Keep current word index - don't reset
+    } catch (error) {
+      console.error("Error stopping playback:", error);
+    }
+  };
+
+  const handleRestart = () => {
+    try {
+      stopSpeech();
+      stopHighlighting();
+      setCurrentWordIndex(-1);
+      setIsPlaying(false);
+    } catch (error) {
+      console.error("Error restarting:", error);
+    }
+  };
+
+  const handleBackward = () => {
+    // Go back 5 words
+    const newIndex = Math.max(-1, currentWordIndex - 5);
+    setCurrentWordIndex(newIndex);
+  };
+
+  const handleForward = () => {
+    // Skip forward 5 words
+    const newIndex = Math.min(words.length - 1, currentWordIndex + 5);
+    setCurrentWordIndex(newIndex);
+  };
+
+  const handleSpeedChange = (speed) => {
+    setCurrentSpeed(speed);
+    if (isPlaying) {
+      // Restart with new speed
+      stopSpeech();
+      stopHighlighting();
+      setTimeout(() => {
+        setIsPlaying(true);
+        speakText(text, speed);
+        startHighlighting();
+      }, 100);
+    }
   };
 
   const startHighlighting = () => {
-    setCurrentLineIndex(0);
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
 
-    const interval = setInterval(() => {
-      setCurrentLineIndex(prev => {
-        if (prev >= lines.length - 1) {
-          clearInterval(interval);
+    setCurrentWordIndex(0);
+
+    // Calculate average time per word (adjust based on speed)
+    // At 1.0x speed: ~240ms per word (typical speaking pace)
+    // Scales inversely with speed
+    const avgTimePerWord = 240 / readingSpeed;
+
+    intervalRef.current = setInterval(() => {
+      setCurrentWordIndex(prev => {
+        if (prev >= words.length - 1) {
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
+          }
+          setIsPlaying(false);
           return -1;
         }
         return prev + 1;
       });
-    }, 4200); // timing per line (adjustable later)
+    }, avgTimePerWord);
   };
 
   const stopHighlighting = () => {
-    setCurrentLineIndex(-1);
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    setCurrentWordIndex(-1);
   };
 
 
@@ -57,42 +150,58 @@ export default function ReaderScreen({ route }) {
         { backgroundColor: getBackgroundColor(backgroundTheme) },
       ]}
     >
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
+      {/* Text Box with Internal Scrolling */}
+      <View
+        style={[
+          styles.textContainerWrapper,
+          showTextBox && styles.textContainerBox,
+          {
+            padding: textBoxPadding,
+          },
+        ]}
       >
-        {lines.map((line, index) => (
-          <Text
-            key={index}
-            style={[
-              styles.text,
-              {
-                fontFamily,
-                fontSize,
-                lineHeight: fontSize * lineHeight,
-                color: textColor,
-                backgroundColor:
-                  index === currentLineIndex ? "#D6EAF8" : "transparent",
-              },
-            ]}
-          >
-            {line + " "}
-          </Text>
-        ))}
-
-      </ScrollView>
-
-      {/* Controls will live here later */}
-      <View style={styles.controls}>
-        <TouchableOpacity style={styles.button} onPress={handlePlay}>
-          <Text style={styles.buttonText}>Play</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.button} onPress={handleStop}>
-          <Text style={styles.buttonText}>Stop</Text>
-        </TouchableOpacity>
+        <ScrollView
+          ref={scrollViewRef}
+          contentContainerStyle={styles.innerScrollContent}
+          showsVerticalScrollIndicator={true}
+          scrollEnabled={true}
+        >
+          {words.map((word, index) => (
+            <Text
+              key={index}
+              style={[
+                styles.word,
+                {
+                  fontFamily,
+                  fontSize,
+                  lineHeight: fontSize * lineHeight,
+                  color: textColor,
+                  letterSpacing: letterSpacing,
+                  marginRight: wordSpacing,
+                  backgroundColor:
+                    index === currentWordIndex ? "#FFD700" : "transparent",
+                  paddingHorizontal: 2,
+                  paddingVertical: 2,
+                  borderRadius: 3,
+                },
+              ]}
+            >
+              {word}
+            </Text>
+          ))}
+        </ScrollView>
       </View>
 
+      {/* Controls */}
+      <ReaderControls
+        isPlaying={isPlaying}
+        onPlayPause={handlePlayPause}
+        onBackward={handleBackward}
+        onForward={handleForward}
+        onRestart={handleRestart}
+        currentSpeed={currentSpeed}
+        onSpeedChange={handleSpeedChange}
+      />
     </SafeAreaView>
   );
 }
@@ -112,37 +221,29 @@ const SAMPLE_TEXT =
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    justifyContent: "space-between",
+    flexDirection: "column",
   },
-  scrollContent: {
-    paddingHorizontal: 24,
-    paddingTop: 32,
-    paddingBottom: 120, // space for future controls
+  innerScrollContent: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignContent: "flex-start",
+    paddingBottom: 120,
   },
-  text: {
+  textContainerWrapper: {
+    flex: 1,
+    marginHorizontal: 16,
+    marginTop: 20,
+    marginBottom: 16,
+    overflow: "hidden",
+  },
+  textContainerBox: {
+    borderWidth: 2,
+    borderColor: "#9ECAE1",
+    borderRadius: 10,
+    backgroundColor: "rgba(156, 202, 225, 0.1)",
+  },
+  word: {
     letterSpacing: 0.3,
   },
-  controlsPlaceholder: {
-    height: 80,
-  },
-  controls: {
-    height: 90,
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    gap: 20,
-  },
-
-  button: {
-    backgroundColor: "#3A6EA5",
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-
-  buttonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-
 });

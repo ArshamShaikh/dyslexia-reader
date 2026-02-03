@@ -1,0 +1,54 @@
+CORE FEATURES (MVP – MUST HAVE)
+Reading &amp; Accessibility
+1. Text input (paste / type)
+2. Text-to-Speech reading
+3. Play / Pause / Resume / Stop
+4. Adjustable reading speed
+5. Line-based text highlighting
+6. Dyslexia-friendly font (Lexend / OpenDyslexic)
+7. Adjustable font size
+8. Adjustable line spacing
+9. Background themes (white, yellow, blue, dark)
+10. Focused reading UI (minimal distractions)
+Usability
+11. Save text passages
+12. Reopen saved texts
+13. Persistent user settings
+14. Offline-first functionality
+Design Philosophy
+15. Dyslexia-first defaults
+16. No error-based feedback
+17. No time pressure
+18. Psychological safety
+
+ENHANCED FEATURES (POST-MVP, HIGH IMPACT)
+Input &amp; Convenience
+19. OCR (scan text from books/images)
+20. Clean OCR text before reading
+Guided Support
+21. Guided reading mode (short chunks)
+22. Sentence-by-sentence navigation
+23. Repeat line / paragraph
+Personalization
+24. Track pauses / replays
+25. Suggest better speed or spacing
+
+26. Rule-based personalization (no heavy AI)
+
+ADVANCED FEATURES (OPTIONAL, IF TIME)
+Language &amp; Comprehension
+27. Hard word detection
+28. Tap word → pronunciation
+29. Simple meaning lookup
+30. Syllable breakdown
+Analytics (Non-Judgmental)
+31. Reading time tracking
+32. Session count
+33. Progress dashboard (effort-based)
+
+BACKEND
+Supabase Integration
+34. User authentication (optional)
+35. Cloud sync for saved texts
+36. Sync settings across devices
+37. Store anonymized reading sessions

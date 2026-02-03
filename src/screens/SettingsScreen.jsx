@@ -1,6 +1,6 @@
 // SettingsScreen.jsx
 import Slider from "@react-native-community/slider";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSettings } from "../context/SettingsContext";
 
@@ -11,6 +11,14 @@ export default function SettingsScreen() {
     setFontSize,
     lineHeight,
     setLineHeight,
+    wordSpacing,
+    setWordSpacing,
+    letterSpacing,
+    setLetterSpacing,
+    textBoxPadding,
+    setTextBoxPadding,
+    showTextBox,
+    setShowTextBox,
     readingSpeed,
     setReadingSpeed,
     backgroundTheme,
@@ -36,7 +44,7 @@ export default function SettingsScreen() {
 
       {/* Line Spacing */}
       <View style={styles.settingBlock}>
-        <Text style={styles.label}>Line Spacing</Text>
+        <Text style={styles.label}>Line Spacing: {lineHeight.toFixed(1)}</Text>
         <Slider
           minimumValue={1.2}
           maximumValue={2.0}
@@ -46,12 +54,64 @@ export default function SettingsScreen() {
         />
       </View>
 
+      {/* Word Spacing */}
+      <View style={styles.settingBlock}>
+        <Text style={styles.label}>Word Spacing: {wordSpacing}pt</Text>
+        <Slider
+          minimumValue={2}
+          maximumValue={12}
+          value={wordSpacing}
+          onValueChange={setWordSpacing}
+          minimumTrackTintColor="#3A6EA5"
+        />
+      </View>
+
+      {/* Letter Spacing */}
+      <View style={styles.settingBlock}>
+        <Text style={styles.label}>Letter Spacing: {letterSpacing.toFixed(1)}</Text>
+        <Slider
+          minimumValue={0.1}
+          maximumValue={1.0}
+          value={letterSpacing}
+          onValueChange={setLetterSpacing}
+          minimumTrackTintColor="#3A6EA5"
+        />
+      </View>
+
+      {/* Text Box Padding */}
+      <View style={styles.settingBlock}>
+        <Text style={styles.label}>Text Box Padding: {textBoxPadding}pt</Text>
+        <Slider
+          minimumValue={8}
+          maximumValue={24}
+          value={textBoxPadding}
+          onValueChange={setTextBoxPadding}
+          minimumTrackTintColor="#3A6EA5"
+        />
+      </View>
+
+      {/* Show Text Box Toggle */}
+      <View style={styles.settingBlock}>
+        <View style={styles.toggleRow}>
+          <Text style={styles.label}>Show Text Box Border</Text>
+          <TouchableOpacity
+            style={[
+              styles.toggleButton,
+              showTextBox && styles.toggleButtonActive,
+            ]}
+            onPress={() => setShowTextBox(!showTextBox)}
+          >
+            <Text style={styles.toggleText}>{showTextBox ? "ON" : "OFF"}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
       {/* Reading Speed */}
       <View style={styles.settingBlock}>
-        <Text style={styles.label}>Reading Speed</Text>
+        <Text style={styles.label}>Reading Speed: {readingSpeed.toFixed(2)}x</Text>
         <Slider
           minimumValue={0.3}
-          maximumValue={0.8}
+          maximumValue={1.0}
           value={readingSpeed}
           onValueChange={setReadingSpeed}
           minimumTrackTintColor="#3A6EA5"
@@ -78,29 +138,54 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#F5F7FA",
-    padding: 20,
+    padding: 16,
   },
 
   title: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: "700",
     color: "#3A6EA5",
-    marginBottom: 20,
+    marginBottom: 16,
     textAlign: "center",
   },
 
   settingBlock: {
     backgroundColor: "#FFFFFF",
-    padding: 15,
-    borderRadius: 10,
-    marginBottom: 15,
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
   },
 
   label: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "600",
-    marginBottom: 8,
+    marginBottom: 6,
     color: "#333",
+  },
+
+  toggleRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+
+  toggleButton: {
+    backgroundColor: "#E0E0E0",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    minWidth: 50,
+  },
+
+  toggleButtonActive: {
+    backgroundColor: "#3A6EA5",
+  },
+
+  toggleText: {
+    fontSize: 12,
+    fontWeight: "600",
+    textAlign: "center",
+    color: "#FFFFFF",
   },
 
   themeRow: {
