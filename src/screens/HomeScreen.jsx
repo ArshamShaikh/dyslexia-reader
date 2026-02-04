@@ -9,10 +9,14 @@ import {
     View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useSettings } from "../context/SettingsContext";
+import { THEMES } from "../theme/colors";
 
 export default function HomeScreen({ navigation }) {
   const [inputText, setInputText] = useState("");
   const [textInputHeight, setTextInputHeight] = useState(120);
+  const { backgroundTheme, textColor } = useSettings();
+  const theme = THEMES[backgroundTheme] || THEMES.light;
 
   const handleContentSizeChange = (event) => {
     const height = Math.min(event.nativeEvent.contentSize.height, 300);
@@ -20,10 +24,10 @@ export default function HomeScreen({ navigation }) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
       <View style={styles.headerContainer}>
-        <Text style={styles.title}>Dyslexia Reader</Text>
-        <Text style={styles.subtitle}>
+        <Text style={[styles.title, { color: textColor }]}>Dyslexia Reader</Text>
+        <Text style={[styles.subtitle, { color: textColor }]}>
           Accessible Reading for Every Learner
         </Text>
       </View>
@@ -31,16 +35,27 @@ export default function HomeScreen({ navigation }) {
       {/* Dynamic Text Box with Floating Play Button */}
       <View style={styles.textInputWrapper}>
         <TextInput
-          style={[styles.textInput, { height: textInputHeight }]}
+          style={[
+            styles.textInput,
+            {
+              height: textInputHeight,
+              color: textColor,
+              borderColor: theme.border,
+              backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            },
+          ]}
           placeholder="Paste or type text here..."
-          placeholderTextColor="#888"
+          placeholderTextColor={theme.background === "#121212" ? "#9EA3A8" : "#888"}
           multiline
           value={inputText}
           onChangeText={setInputText}
           onContentSizeChange={handleContentSizeChange}
         />
         <TouchableOpacity
-          style={styles.playButton}
+          style={[
+            styles.playButton,
+            { backgroundColor: theme.background === "#121212" ? "#333333" : "#1F1F1F" },
+          ]}
           onPress={() =>
             navigation.navigate("Reader", {
               text: inputText || "Sample reading text will appear here.",
@@ -55,14 +70,31 @@ export default function HomeScreen({ navigation }) {
 
       <View style={styles.buttonContainer}>
         <TouchableOpacity
-          style={styles.secondaryButton}
+          style={[
+            styles.secondaryButton,
+            { borderColor: theme.border },
+          ]}
           onPress={() => navigation.navigate("Saved")}
         >
-          <Text style={styles.secondaryButtonText}>Saved Texts</Text>
+          <Text style={[styles.secondaryButtonText, { color: textColor }]}>
+            Saved Texts
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.secondaryButton,
+            { borderColor: theme.border },
+          ]}
+          onPress={() => navigation.navigate("Settings")}
+        >
+          <Text style={[styles.secondaryButtonText, { color: textColor }]}>
+            Reading Settings
+          </Text>
         </TouchableOpacity>
 
         <View style={styles.placeholderFeature}>
-          <Text style={styles.placeholderText}>
+          <Text style={[styles.placeholderText, { color: textColor }]}>
             OCR Scan Feature (Coming Soon)
           </Text>
         </View>
@@ -74,7 +106,7 @@ export default function HomeScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F5F7FA",
+    backgroundColor: "transparent",
     padding: 16,
     flexDirection: "column",
   },
@@ -86,7 +118,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 26,
     fontWeight: "700",
-    color: "#3A6EA5",
+    color: "#1F1F1F",
     textAlign: "center",
   },
 
@@ -117,14 +149,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#000",
     borderWidth: 2,
-    borderColor: "#9ECAE1",
+    borderColor: "#BDBDBD",
   },
 
   playButton: {
     position: "absolute",
     bottom: 12,
     right: 12,
-    backgroundColor: "#3A6EA5",
+    backgroundColor: "#1F1F1F",
     borderRadius: 24,
     width: 44,
     height: 44,
@@ -142,7 +174,7 @@ const styles = StyleSheet.create({
   },
 
   primaryButton: {
-    backgroundColor: "#3A6EA5",
+    backgroundColor: "#1F1F1F",
     paddingVertical: 12,
     borderRadius: 8,
   },
@@ -156,13 +188,13 @@ const styles = StyleSheet.create({
 
   secondaryButton: {
     borderWidth: 1.5,
-    borderColor: "#3A6EA5",
+    borderColor: "#BDBDBD",
     paddingVertical: 10,
     borderRadius: 8,
   },
 
   secondaryButtonText: {
-    color: "#3A6EA5",
+    color: "#1F1F1F",
     textAlign: "center",
     fontSize: 14,
     fontWeight: "600",

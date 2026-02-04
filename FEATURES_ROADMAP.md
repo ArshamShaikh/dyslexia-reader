@@ -40,6 +40,7 @@
 #### 4. **Text-to-Speech Highlighting Sync**
 - **Current**: ✅ Already implemented with word-level highlighting
 - **Enhancement**: Allow highlighting different text chunks (word, phrase, line)
+ - **Note (Accuracy Upgrade)**: For Speechify-level accuracy, use a TTS engine that provides per-word timepoints (native callbacks or cloud TTS). Expo Speech does not provide reliable word timing.
 
 #### 5. **Dictionary/Definition Lookup**
 - **Why**: Unknown words create comprehension barriers

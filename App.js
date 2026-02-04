@@ -1,6 +1,7 @@
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { StatusBar } from "expo-status-bar";
+import { useFonts } from "expo-font";
 import { SettingsProvider } from "./src/context/SettingsContext";
 import HomeScreen from "./src/screens/HomeScreen";
 import ReaderScreen from "./src/screens/ReaderScreen";
@@ -11,6 +12,16 @@ import SettingsScreen from "./src/screens/SettingsScreen";
 const Stack = createNativeStackNavigator();
 
 export default function App() {
+  const [fontsLoaded] = useFonts({
+    "Lexend-Regular": require("./assets/lexend/static/Lexend-Regular.ttf"),
+    "Lexend-SemiBold": require("./assets/lexend/static/Lexend-SemiBold.ttf"),
+    "OpenDyslexic-Regular": require("./assets/opendyslexic-0.92/OpenDyslexic-Regular.otf"),
+  });
+
+  if (!fontsLoaded) {
+    return null;
+  }
+
   return (
     <SettingsProvider>
       <StatusBar style="dark" />
