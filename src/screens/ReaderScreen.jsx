@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Dimensions,
   Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Switch,
@@ -30,6 +31,7 @@ export default function ReaderScreen({ route, navigation }) {
   const [saveNotice, setSaveNotice] = useState("");
   const [showQuickSettings, setShowQuickSettings] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [showMoreSettings, setShowMoreSettings] = useState(false);
   const timeoutRef = useRef(null);
   const scrollViewRef = useRef(null);
   const lineOffsetsRef = useRef([]);
@@ -53,6 +55,8 @@ export default function ReaderScreen({ route, navigation }) {
     setBackgroundTheme,
     setHighlightStrength,
     setFontFamily,
+    setWordSpacing,
+    setLetterSpacing,
   } = useSettings();
 
   const theme = THEMES[backgroundTheme] || THEMES.light;
@@ -61,10 +65,10 @@ export default function ReaderScreen({ route, navigation }) {
   const windowWidth = Dimensions.get("window").width;
   const lineHeightPx = Math.round(fontSize * lineHeight);
   const lineGap = Math.max(4, Math.round(lineHeightPx - fontSize));
-  const approxCharWidth = fontSize * 0.55 + wordSpacing * 0.15;
+  const approxCharWidth = fontSize * 0.55 + wordSpacing * 0.25 + letterSpacing * 0.6;
   const maxCharsPerLine = Math.max(
     22,
-    Math.floor((windowWidth - textBoxPadding * 2 - 32) / approxCharWidth)
+    Math.floor((windowWidth - textBoxPadding * 2 - 48) / approxCharWidth)
   );
 
   const lines = useMemo(() => {
@@ -123,14 +127,24 @@ export default function ReaderScreen({ route, navigation }) {
     }
   };
 
+  const buildRemainingText = (lineIndex, wordIndex) => {
+    if (lineIndex < 0) return lines.join(" ");
+    const currentLineWords = lineWords[lineIndex] || [];
+    const currentSlice =
+      wordIndex >= 0 ? currentLineWords.slice(wordIndex) : currentLineWords;
+    const remainingLines = lines.slice(lineIndex + 1);
+    return [currentSlice.join(" "), ...remainingLines].join(" ").trim();
+  };
+
   const handlePlay = () => {
     try {
       if (!lines.length) return;
-      const startIndex = currentLineIndex >= 0 ? currentLineIndex : 0;
+      const startLineIndex = currentLineIndex >= 0 ? currentLineIndex : 0;
+      const startWordIndex = currentWordIndex >= 0 ? currentWordIndex : 0;
       setIsPlaying(true);
       setIsPaused(false);
-      speakText(lines.slice(startIndex).join(" "), readingSpeed);
-      startHighlighting(startIndex);
+      speakText(buildRemainingText(startLineIndex, startWordIndex), readingSpeed);
+      startHighlighting(startLineIndex, startWordIndex);
     } catch (error) {
       console.error("Error during playback:", error);
       setIsPlaying(false);
@@ -189,8 +203,8 @@ export default function ReaderScreen({ route, navigation }) {
     setCurrentWordIndex(-1);
     if (isPlaying) {
       stopSpeech();
-      startHighlighting(newIndex);
-      speakText(lines.slice(newIndex).join(" "), readingSpeed);
+      startHighlighting(newIndex, 0);
+      speakText(buildRemainingText(newIndex, 0), readingSpeed);
     }
   };
 
@@ -201,8 +215,8 @@ export default function ReaderScreen({ route, navigation }) {
     setCurrentWordIndex(-1);
     if (isPlaying) {
       stopSpeech();
-      startHighlighting(newIndex);
-      speakText(lines.slice(newIndex).join(" "), readingSpeed);
+      startHighlighting(newIndex, 0);
+      speakText(buildRemainingText(newIndex, 0), readingSpeed);
     }
   };
 
@@ -214,13 +228,15 @@ export default function ReaderScreen({ route, navigation }) {
       stopHighlighting();
       setTimeout(() => {
         setIsPlaying(true);
-        speakText(lines.slice(currentLineIndex >= 0 ? currentLineIndex : 0).join(" "), speed);
-        startHighlighting(currentLineIndex >= 0 ? currentLineIndex : 0);
+        const resumeLine = currentLineIndex >= 0 ? currentLineIndex : 0;
+        const resumeWord = currentWordIndex >= 0 ? currentWordIndex : 0;
+        speakText(buildRemainingText(resumeLine, resumeWord), speed);
+        startHighlighting(resumeLine, resumeWord);
       }, 100);
     }
   };
 
-  const startHighlighting = (startIndex = 0) => {
+  const startHighlighting = (startIndex = 0, startWord = 0) => {
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
     }
@@ -256,7 +272,7 @@ export default function ReaderScreen({ route, navigation }) {
       }, delay);
     };
 
-    advanceWord(startIndex, 0);
+    advanceWord(startIndex, startWord);
   };
 
   const stopHighlighting = () => {
@@ -451,11 +467,14 @@ export default function ReaderScreen({ route, navigation }) {
         animationType="slide"
         onRequestClose={() => setShowQuickSettings(false)}
       >
-        <TouchableOpacity
-          style={[styles.quickSettingsOverlay, { backgroundColor: "transparent" }]}
-          activeOpacity={1}
-          onPress={() => setShowQuickSettings(false)}
-        >
+        <View style={[styles.quickSettingsOverlay, { backgroundColor: "transparent" }]}>
+          <Pressable
+            style={styles.quickSettingsBackdrop}
+            onPress={() => {
+              setShowQuickSettings(false);
+              setShowMoreSettings(false);
+            }}
+          />
           <View
             style={[
               styles.quickSettingsPanel,
@@ -468,13 +487,60 @@ export default function ReaderScreen({ route, navigation }) {
           >
             <View style={styles.quickHeader}>
               <Text style={[styles.quickTitle, { color: textColor }]}>
-                Quick Settings
+                Settings
               </Text>
-              <TouchableOpacity onPress={() => setShowQuickSettings(false)}>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowQuickSettings(false);
+                  setShowMoreSettings(false);
+                }}
+              >
                 <MaterialIcons name="close" size={20} color={textColor} />
               </TouchableOpacity>
             </View>
 
+            <View style={styles.quickTabs}>
+              <TouchableOpacity
+                style={[
+                  styles.quickTab,
+                  !showMoreSettings && { backgroundColor: textColor },
+                  { borderColor: theme.border },
+                ]}
+                onPress={() => setShowMoreSettings(false)}
+              >
+                <Text
+                  style={[
+                    styles.quickTabText,
+                    { color: !showMoreSettings ? theme.background : textColor },
+                  ]}
+                >
+                  Quick
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.quickTab,
+                  showMoreSettings && { backgroundColor: textColor },
+                  { borderColor: theme.border },
+                ]}
+                onPress={() => setShowMoreSettings(true)}
+              >
+                <Text
+                  style={[
+                    styles.quickTabText,
+                    { color: showMoreSettings ? theme.background : textColor },
+                  ]}
+                >
+                  Advanced
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={styles.quickScroll}
+              contentContainerStyle={styles.quickScrollContent}
+              showsVerticalScrollIndicator={true}
+            >
             <View style={styles.quickRow}>
               <Text style={[styles.quickLabel, { color: textColor }]}>Theme</Text>
               <View style={styles.quickToggleRow}>
@@ -491,34 +557,36 @@ export default function ReaderScreen({ route, navigation }) {
               </View>
             </View>
 
-            <View style={styles.quickRow}>
-              <Text style={[styles.quickLabel, { color: textColor }]}>Font</Text>
-              <View style={styles.quickChipRow}>
-                {["Lexend", "OpenDyslexic", "System"].map((font) => {
-                  const isActive = fontFamily === font;
-                  return (
-                    <TouchableOpacity
-                      key={font}
-                      style={[
-                        styles.quickChip,
-                        isActive && { backgroundColor: textColor },
-                        { borderColor: theme.border },
-                      ]}
-                      onPress={() => setFontFamily(font)}
-                    >
-                      <Text
+            {showMoreSettings && (
+              <View style={styles.quickRow}>
+                <Text style={[styles.quickLabel, { color: textColor }]}>Font</Text>
+                <View style={styles.quickChipRow}>
+                  {["Lexend", "OpenDyslexic", "System"].map((font) => {
+                    const isActive = fontFamily === font;
+                    return (
+                      <TouchableOpacity
+                        key={font}
                         style={[
-                          styles.quickChipText,
-                          { color: isActive ? theme.background : textColor },
+                          styles.quickChip,
+                          isActive && { backgroundColor: textColor },
+                          { borderColor: theme.border },
                         ]}
+                        onPress={() => setFontFamily(font)}
                       >
-                        {font}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
+                        <Text
+                          style={[
+                            styles.quickChipText,
+                            { color: isActive ? theme.background : textColor },
+                          ]}
+                        >
+                          {font}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
               </View>
-            </View>
+            )}
 
             <View style={styles.quickRow}>
               <View style={styles.quickRowHeader}>
@@ -588,44 +656,123 @@ export default function ReaderScreen({ route, navigation }) {
               />
             </View>
 
-
-            <View style={styles.quickRow}>
-              <View style={styles.quickRowHeader}>
-                <Text style={[styles.quickLabel, { color: textColor }]}>
-                  Highlight Strength: {Math.round(highlightStrength * 100)}%
-                </Text>
-                <View style={styles.quickStepper}>
-                  <TouchableOpacity
-                    style={styles.quickStepButton}
-                    onPress={() =>
-                      setHighlightStrength((v) => stepAdjust(v, 0.1, 0.2, 1.0, -1))
-                    }
-                  >
-                    <Text style={[styles.quickStepText, { color: textColor }]}>-</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.quickStepButton}
-                    onPress={() =>
-                      setHighlightStrength((v) => stepAdjust(v, 0.1, 0.2, 1.0, 1))
-                    }
-                  >
-                    <Text style={[styles.quickStepText, { color: textColor }]}>+</Text>
-                  </TouchableOpacity>
+            {showMoreSettings && (
+              <>
+            {showMoreSettings && (
+              <View style={styles.quickRow}>
+                <View style={styles.quickRowHeader}>
+                  <Text style={[styles.quickLabel, { color: textColor }]}>
+                    Word Spacing: {wordSpacing.toFixed(0)}pt
+                  </Text>
+                  <View style={styles.quickStepper}>
+                    <TouchableOpacity
+                      style={styles.quickStepButton}
+                      onPress={() => setWordSpacing((v) => stepAdjust(v, 1, 2, 12, -1))}
+                    >
+                      <Text style={[styles.quickStepText, { color: textColor }]}>-</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.quickStepButton}
+                      onPress={() => setWordSpacing((v) => stepAdjust(v, 1, 2, 12, 1))}
+                    >
+                      <Text style={[styles.quickStepText, { color: textColor }]}>+</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
+                <Slider
+                  minimumValue={2}
+                  maximumValue={12}
+                  step={1}
+                  value={wordSpacing}
+                  onValueChange={(value) => setWordSpacing(value)}
+                  minimumTrackTintColor={textColor}
+                  maximumTrackTintColor={theme.border}
+                  thumbTintColor={textColor}
+                />
               </View>
-              <Slider
-                minimumValue={0.2}
-                maximumValue={1.0}
-                step={0.1}
-                value={highlightStrength}
-                onValueChange={(value) => setHighlightStrength(Number(value.toFixed(2)))}
-                minimumTrackTintColor={textColor}
-                maximumTrackTintColor={theme.border}
-                thumbTintColor={textColor}
-              />
-            </View>
+            )}
+
+            {showMoreSettings && (
+              <View style={styles.quickRow}>
+                <View style={styles.quickRowHeader}>
+                  <Text style={[styles.quickLabel, { color: textColor }]}>
+                    Letter Spacing: {letterSpacing.toFixed(2)}
+                  </Text>
+                  <View style={styles.quickStepper}>
+                    <TouchableOpacity
+                      style={styles.quickStepButton}
+                      onPress={() =>
+                        setLetterSpacing((v) => stepAdjust(v, 0.05, 0.1, 1.0, -1))
+                      }
+                    >
+                      <Text style={[styles.quickStepText, { color: textColor }]}>-</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.quickStepButton}
+                      onPress={() =>
+                        setLetterSpacing((v) => stepAdjust(v, 0.05, 0.1, 1.0, 1))
+                      }
+                    >
+                      <Text style={[styles.quickStepText, { color: textColor }]}>+</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                <Slider
+                  minimumValue={0.1}
+                  maximumValue={1.0}
+                  step={0.05}
+                  value={letterSpacing}
+                  onValueChange={(value) => setLetterSpacing(Number(value.toFixed(2)))}
+                  minimumTrackTintColor={textColor}
+                  maximumTrackTintColor={theme.border}
+                  thumbTintColor={textColor}
+                />
+              </View>
+            )}
+
+            {!showMoreSettings && (
+              <View style={styles.quickRow}>
+                <View style={styles.quickRowHeader}>
+                  <Text style={[styles.quickLabel, { color: textColor }]}>
+                    Highlight Strength: {Math.round(highlightStrength * 100)}%
+                  </Text>
+                  <View style={styles.quickStepper}>
+                    <TouchableOpacity
+                      style={styles.quickStepButton}
+                      onPress={() =>
+                        setHighlightStrength((v) => stepAdjust(v, 0.1, 0.2, 1.0, -1))
+                      }
+                    >
+                      <Text style={[styles.quickStepText, { color: textColor }]}>-</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.quickStepButton}
+                      onPress={() =>
+                        setHighlightStrength((v) => stepAdjust(v, 0.1, 0.2, 1.0, 1))
+                      }
+                    >
+                      <Text style={[styles.quickStepText, { color: textColor }]}>+</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                <Slider
+                  minimumValue={0.2}
+                  maximumValue={1.0}
+                  step={0.1}
+                  value={highlightStrength}
+                  onValueChange={(value) => setHighlightStrength(Number(value.toFixed(2)))}
+                  minimumTrackTintColor={textColor}
+                  maximumTrackTintColor={theme.border}
+                  thumbTintColor={textColor}
+                />
+              </View>
+            )}
+              </>
+            )}
+
+            </ScrollView>
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -703,12 +850,31 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0, 0, 0, 0.4)",
     justifyContent: "flex-end",
   },
+  quickSettingsBackdrop: {
+    flex: 1,
+  },
   quickSettingsPanel: {
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     padding: 16,
     gap: 12,
     borderWidth: 1,
+  },
+  quickTabs: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  quickTab: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  quickTabText: {
+    fontSize: 12,
+    fontWeight: "700",
   },
   quickHeader: {
     flexDirection: "row",
@@ -777,7 +943,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginTop: 20,
     marginBottom: 16,
-    overflow: "hidden",
+    overflow: "visible",
     minHeight: 0,
   },
   textContainerWrapperFull: {

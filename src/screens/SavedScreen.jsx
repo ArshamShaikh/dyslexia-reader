@@ -73,6 +73,7 @@ export default function SavedScreen({ navigation }) {
           )}
         />
       )}
+
     </SafeAreaView>
   );
 }

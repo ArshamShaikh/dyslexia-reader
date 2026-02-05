@@ -2,6 +2,7 @@
 import { MaterialIcons } from "@expo/vector-icons";
 import { useState } from "react";
 import {
+    Alert,
     StyleSheet,
     Text,
     TextInput,
@@ -11,6 +12,9 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSettings } from "../context/SettingsContext";
 import { THEMES } from "../theme/colors";
+import * as Clipboard from "expo-clipboard";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system";
 
 export default function HomeScreen({ navigation }) {
   const [inputText, setInputText] = useState("");
@@ -21,6 +25,47 @@ export default function HomeScreen({ navigation }) {
   const handleContentSizeChange = (event) => {
     const height = Math.min(event.nativeEvent.contentSize.height, 300);
     setTextInputHeight(Math.max(120, height));
+  };
+  const handlePasteFromClipboard = async () => {
+    const text = await Clipboard.getStringAsync();
+    if (!text) {
+      Alert.alert("Clipboard is empty", "Copy some text and try again.");
+      return;
+    }
+    setInputText(text);
+  };
+
+  const handlePickFile = async () => {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ["text/plain", "text/*"],
+      copyToCacheDirectory: true,
+    });
+    if (result.canceled) return;
+
+    const file = result.assets?.[0];
+    if (!file) return;
+
+    try {
+      const content = await FileSystem.readAsStringAsync(file.uri);
+      if (!content) {
+        Alert.alert("File is empty", "Please choose a file with text.");
+        return;
+      }
+      setInputText(content);
+    } catch (error) {
+      Alert.alert("Couldn't open file", "Try a different file.");
+    }
+  };
+
+  const handleOCR = () => {
+    Alert.alert("OCR coming soon", "We’ll add camera scanning in Phase 3.");
+  };
+
+  const handlePDF = () => {
+    Alert.alert(
+      "PDF support coming soon",
+      "We’ll add cloud PDF extraction for full cross-platform support."
+    );
   };
 
   return (
@@ -68,37 +113,75 @@ export default function HomeScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.buttonContainer}>
+      <View style={styles.inputActions}>
         <TouchableOpacity
           style={[
-            styles.secondaryButton,
-            { borderColor: theme.border },
+            styles.actionButton,
+            {
+              borderColor: theme.border,
+              backgroundColor:
+                theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            },
           ]}
-          onPress={() => navigation.navigate("Saved")}
+          onPress={handlePickFile}
+          accessibilityLabel="Attach file"
         >
-          <Text style={[styles.secondaryButtonText, { color: textColor }]}>
-            Saved Texts
-          </Text>
+          <MaterialIcons name="attach-file" size={22} color={textColor} />
+          <Text style={[styles.actionLabel, { color: textColor }]}>File</Text>
         </TouchableOpacity>
-
         <TouchableOpacity
           style={[
-            styles.secondaryButton,
-            { borderColor: theme.border },
+            styles.actionButton,
+            {
+              borderColor: theme.border,
+              backgroundColor:
+                theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            },
           ]}
-          onPress={() => navigation.navigate("Settings")}
+          onPress={handlePDF}
+          accessibilityLabel="PDF import"
         >
-          <Text style={[styles.secondaryButtonText, { color: textColor }]}>
-            Reading Settings
-          </Text>
+          <MaterialIcons name="picture-as-pdf" size={22} color={textColor} />
+          <Text style={[styles.actionLabel, { color: textColor }]}>PDF</Text>
         </TouchableOpacity>
-
-        <View style={styles.placeholderFeature}>
-          <Text style={[styles.placeholderText, { color: textColor }]}>
-            OCR Scan Feature (Coming Soon)
-          </Text>
-        </View>
+        <TouchableOpacity
+          style={[
+            styles.actionButton,
+            {
+              borderColor: theme.border,
+              backgroundColor:
+                theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            },
+          ]}
+          onPress={handleOCR}
+          accessibilityLabel="Scan text"
+        >
+          <MaterialIcons name="document-scanner" size={22} color={textColor} />
+          <Text style={[styles.actionLabel, { color: textColor }]}>Scan</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.actionButton,
+            {
+              borderColor: theme.border,
+              backgroundColor:
+                theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            },
+          ]}
+          onPress={handlePasteFromClipboard}
+          accessibilityLabel="Paste from clipboard"
+        >
+          <MaterialIcons name="content-paste" size={22} color={textColor} />
+          <Text style={[styles.actionLabel, { color: textColor }]}>Paste</Text>
+        </TouchableOpacity>
       </View>
+
+      <View style={styles.placeholderFeature}>
+        <Text style={[styles.placeholderText, { color: textColor }]}>
+          More input options coming soon
+        </Text>
+      </View>
+
     </SafeAreaView>
   );
 }
@@ -211,5 +294,24 @@ const styles = StyleSheet.create({
   placeholderText: {
     color: "#888",
     fontSize: 11,
+  },
+  inputActions: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 10,
+    marginTop: 6,
+  },
+  actionButton: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    gap: 4,
+  },
+  actionLabel: {
+    fontSize: 11,
+    fontWeight: "600",
   },
 });
