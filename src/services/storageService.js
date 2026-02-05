@@ -31,9 +31,22 @@ export const getSavedTexts = async () => {
   }
 };
 
+export const isTextSaved = async (text) => {
+  const trimmed = (text || "").trim();
+  if (!trimmed) return false;
+  const existing = await getSavedTexts();
+  return existing.some((item) => item.text === trimmed);
+};
+
 export const addSavedText = async (text, title) => {
   const trimmed = (text || "").trim();
   if (!trimmed) return [];
+
+  const existing = await getSavedTexts();
+  const alreadySaved = existing.find((item) => item.text === trimmed);
+  if (alreadySaved) {
+    return existing;
+  }
 
   const entry = {
     id: Date.now().toString(),
@@ -41,8 +54,6 @@ export const addSavedText = async (text, title) => {
     text: trimmed,
     createdAt: new Date().toISOString(),
   };
-
-  const existing = await getSavedTexts();
   const updated = [entry, ...existing];
   try {
     await AsyncStorage.setItem(SAVED_TEXTS_KEY, JSON.stringify(updated));

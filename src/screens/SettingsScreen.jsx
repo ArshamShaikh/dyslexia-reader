@@ -3,7 +3,6 @@ import Slider from "@react-native-community/slider";
 import {
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TouchableOpacity,
   View,
@@ -25,8 +24,6 @@ export default function SettingsScreen() {
     setLetterSpacing,
     textBoxPadding,
     setTextBoxPadding,
-    showTextBox,
-    setShowTextBox,
     readingSpeed,
     setReadingSpeed,
     backgroundTheme,
@@ -63,7 +60,10 @@ export default function SettingsScreen() {
         <View
           style={[
             styles.settingBlock,
-            { backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF" },
+            {
+              backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+              borderColor: theme.border,
+            },
           ]}
         >
           <Text style={[styles.label, { color: theme.text }]}>Theme</Text>
@@ -102,14 +102,30 @@ export default function SettingsScreen() {
       <View
         style={[
           styles.settingBlock,
-          { backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF" },
+          {
+            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            borderColor: theme.border,
+          },
         ]}
       >
         <View style={styles.rowHeader}>
           <Text style={[styles.label, { color: theme.text }]}>
             Highlight Strength: {Math.round(highlightStrength * 100)}%
           </Text>
-          <View style={styles.stepperRow}>
+        </View>
+        <View style={styles.sliderRow}>
+          <Slider
+            style={styles.slider}
+            minimumValue={0.2}
+            maximumValue={1.0}
+            step={0.1}
+            value={highlightStrength}
+            onValueChange={(value) => setHighlightStrength(Number(value.toFixed(2)))}
+            minimumTrackTintColor={theme.text}
+            maximumTrackTintColor={theme.border}
+            thumbTintColor={theme.text}
+          />
+          <View style={styles.stepperInline}>
             <TouchableOpacity
               style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
               onPress={() =>
@@ -134,51 +150,26 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
         </View>
-        <Slider
-          minimumValue={0.2}
-          maximumValue={1.0}
-          step={0.1}
-          value={highlightStrength}
-          onValueChange={(value) => setHighlightStrength(Number(value.toFixed(2)))}
-          minimumTrackTintColor={theme.text}
-          maximumTrackTintColor={theme.border}
-          thumbTintColor={theme.text}
-        />
       </View>
 
       {/* Font Size */}
       <View
         style={[
           styles.settingBlock,
-          { backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF" },
+          {
+            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            borderColor: theme.border,
+          },
         ]}
         >
-          <View style={styles.rowHeader}>
-            <Text style={[styles.label, { color: theme.text }]}>
-              Font Size: {fontSize.toFixed(0)}
-            </Text>
-            <View style={styles.stepperRow}>
-              <TouchableOpacity
-                style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
-                onPress={() =>
-                  setFontSize((prev) => stepAdjust(prev, 1, 14, 26, -1))
-                }
-                accessibilityLabel="Decrease font size"
-              >
-                <Text style={[styles.stepperText, stepperTextStyle(theme.background)]}>-</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
-                onPress={() =>
-                  setFontSize((prev) => stepAdjust(prev, 1, 14, 26, 1))
-                }
-                accessibilityLabel="Increase font size"
-              >
-                <Text style={[styles.stepperText, stepperTextStyle(theme.background)]}>+</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+        <View style={styles.rowHeader}>
+          <Text style={[styles.label, { color: theme.text }]}>
+            Font Size: {fontSize.toFixed(0)}
+          </Text>
+        </View>
+        <View style={styles.sliderRow}>
           <Slider
+            style={styles.slider}
             minimumValue={14}
             maximumValue={26}
             step={1}
@@ -188,13 +179,37 @@ export default function SettingsScreen() {
             maximumTrackTintColor={theme.border}
             thumbTintColor={theme.text}
           />
+          <View style={styles.stepperInline}>
+            <TouchableOpacity
+              style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
+              onPress={() =>
+                setFontSize((prev) => stepAdjust(prev, 1, 14, 26, -1))
+              }
+              accessibilityLabel="Decrease font size"
+            >
+              <Text style={[styles.stepperText, stepperTextStyle(theme.background)]}>-</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
+              onPress={() =>
+                setFontSize((prev) => stepAdjust(prev, 1, 14, 26, 1))
+              }
+              accessibilityLabel="Increase font size"
+            >
+              <Text style={[styles.stepperText, stepperTextStyle(theme.background)]}>+</Text>
+            </TouchableOpacity>
+          </View>
         </View>
+      </View>
 
       {/* Font Family */}
       <View
         style={[
           styles.settingBlock,
-          { backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF" },
+          {
+            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            borderColor: theme.border,
+          },
         ]}
       >
         <Text style={[styles.label, { color: theme.text }]}>Font</Text>
@@ -232,14 +247,32 @@ export default function SettingsScreen() {
       <View
         style={[
           styles.settingBlock,
-          { backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF" },
+          {
+            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            borderColor: theme.border,
+          },
         ]}
       >
         <View style={styles.rowHeader}>
           <Text style={[styles.label, { color: theme.text }]}>
             Line Spacing: {lineHeight.toFixed(2)}
           </Text>
-          <View style={styles.stepperRow}>
+        </View>
+        <View style={styles.sliderRow}>
+          <Slider
+            style={styles.slider}
+            minimumValue={1.2}
+            maximumValue={2.0}
+            step={0.05}
+            value={lineHeight}
+            onValueChange={(value) =>
+              setLineHeight(Number(value.toFixed(2)))
+            }
+            minimumTrackTintColor={theme.text}
+            maximumTrackTintColor={theme.border}
+            thumbTintColor={theme.text}
+          />
+          <View style={styles.stepperInline}>
             <TouchableOpacity
               style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
               onPress={() =>
@@ -260,32 +293,36 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
         </View>
-        <Slider
-          minimumValue={1.2}
-          maximumValue={2.0}
-          step={0.05}
-          value={lineHeight}
-          onValueChange={(value) =>
-            setLineHeight(Number(value.toFixed(2)))
-          }
-          minimumTrackTintColor={theme.text}
-          maximumTrackTintColor={theme.border}
-          thumbTintColor={theme.text}
-        />
       </View>
 
       {/* Word Spacing */}
       <View
         style={[
           styles.settingBlock,
-          { backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF" },
+          {
+            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            borderColor: theme.border,
+          },
         ]}
       >
         <View style={styles.rowHeader}>
           <Text style={[styles.label, { color: theme.text }]}>
             Word Spacing: {wordSpacing.toFixed(0)}pt
           </Text>
-          <View style={styles.stepperRow}>
+        </View>
+        <View style={styles.sliderRow}>
+          <Slider
+            style={styles.slider}
+            minimumValue={2}
+            maximumValue={12}
+            step={1}
+            value={wordSpacing}
+            onValueChange={(value) => setWordSpacing(value)}
+            minimumTrackTintColor={theme.text}
+            maximumTrackTintColor={theme.border}
+            thumbTintColor={theme.text}
+          />
+          <View style={styles.stepperInline}>
             <TouchableOpacity
               style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
               onPress={() =>
@@ -306,30 +343,38 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
         </View>
-        <Slider
-          minimumValue={2}
-          maximumValue={12}
-          step={1}
-          value={wordSpacing}
-          onValueChange={(value) => setWordSpacing(value)}
-          minimumTrackTintColor={theme.text}
-          maximumTrackTintColor={theme.border}
-          thumbTintColor={theme.text}
-        />
       </View>
 
       {/* Letter Spacing */}
       <View
         style={[
           styles.settingBlock,
-          { backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF" },
+          {
+            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            borderColor: theme.border,
+          },
         ]}
       >
         <View style={styles.rowHeader}>
           <Text style={[styles.label, { color: theme.text }]}>
             Letter Spacing: {letterSpacing.toFixed(2)}
           </Text>
-          <View style={styles.stepperRow}>
+        </View>
+        <View style={styles.sliderRow}>
+          <Slider
+            style={styles.slider}
+            minimumValue={0.1}
+            maximumValue={1.0}
+            step={0.05}
+            value={letterSpacing}
+            onValueChange={(value) =>
+              setLetterSpacing(Number(value.toFixed(2)))
+            }
+            minimumTrackTintColor={theme.text}
+            maximumTrackTintColor={theme.border}
+            thumbTintColor={theme.text}
+          />
+          <View style={styles.stepperInline}>
             <TouchableOpacity
               style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
               onPress={() =>
@@ -350,32 +395,36 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
         </View>
-        <Slider
-          minimumValue={0.1}
-          maximumValue={1.0}
-          step={0.05}
-          value={letterSpacing}
-          onValueChange={(value) =>
-            setLetterSpacing(Number(value.toFixed(2)))
-          }
-          minimumTrackTintColor={theme.text}
-          maximumTrackTintColor={theme.border}
-          thumbTintColor={theme.text}
-        />
       </View>
 
       {/* Text Box Padding */}
       <View
         style={[
           styles.settingBlock,
-          { backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF" },
+          {
+            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            borderColor: theme.border,
+          },
         ]}
       >
         <View style={styles.rowHeader}>
           <Text style={[styles.label, { color: theme.text }]}>
             Text Box Padding: {textBoxPadding.toFixed(0)}pt
           </Text>
-          <View style={styles.stepperRow}>
+        </View>
+        <View style={styles.sliderRow}>
+          <Slider
+            style={styles.slider}
+            minimumValue={8}
+            maximumValue={24}
+            step={1}
+            value={textBoxPadding}
+            onValueChange={(value) => setTextBoxPadding(value)}
+            minimumTrackTintColor={theme.text}
+            maximumTrackTintColor={theme.border}
+            thumbTintColor={theme.text}
+          />
+          <View style={styles.stepperInline}>
             <TouchableOpacity
               style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
               onPress={() =>
@@ -396,55 +445,38 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
         </View>
-        <Slider
-          minimumValue={8}
-          maximumValue={24}
-          step={1}
-          value={textBoxPadding}
-          onValueChange={(value) => setTextBoxPadding(value)}
-          minimumTrackTintColor={theme.text}
-          maximumTrackTintColor={theme.border}
-          thumbTintColor={theme.text}
-        />
-      </View>
-
-      {/* Show Text Box Toggle */}
-      <View
-        style={[
-          styles.settingBlock,
-          { backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF" },
-        ]}
-      >
-        <View style={styles.toggleRow}>
-          <Text style={[styles.label, { color: theme.text }]}>
-            Show Text Box Border
-          </Text>
-          <View style={styles.toggleControl}>
-            <Text style={[styles.toggleLabel, { color: theme.text }]}>
-              {showTextBox ? "ON" : "OFF"}
-            </Text>
-            <Switch
-              value={showTextBox}
-              onValueChange={setShowTextBox}
-              trackColor={{ false: "#BDBDBD", true: theme.text }}
-              thumbColor={showTextBox ? theme.background : "#F4F4F4"}
-            />
-          </View>
-        </View>
       </View>
 
       {/* Reading Speed */}
       <View
         style={[
           styles.settingBlock,
-          { backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF" },
+          {
+            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            borderColor: theme.border,
+          },
         ]}
       >
         <View style={styles.rowHeader}>
           <Text style={[styles.label, { color: theme.text }]}>
             Reading Speed: {readingSpeed.toFixed(2)}x
           </Text>
-          <View style={styles.stepperRow}>
+        </View>
+        <View style={styles.sliderRow}>
+          <Slider
+            style={styles.slider}
+            minimumValue={0.3}
+            maximumValue={1.0}
+            step={0.05}
+            value={readingSpeed}
+            onValueChange={(value) =>
+              setReadingSpeed(Number(value.toFixed(2)))
+            }
+            minimumTrackTintColor={theme.text}
+            maximumTrackTintColor={theme.border}
+            thumbTintColor={theme.text}
+          />
+          <View style={styles.stepperInline}>
             <TouchableOpacity
               style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
               onPress={() =>
@@ -465,18 +497,6 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
         </View>
-        <Slider
-          minimumValue={0.3}
-          maximumValue={1.0}
-          step={0.05}
-          value={readingSpeed}
-          onValueChange={(value) =>
-            setReadingSpeed(Number(value.toFixed(2)))
-          }
-          minimumTrackTintColor={theme.text}
-          maximumTrackTintColor={theme.border}
-          thumbTintColor={theme.text}
-        />
       </View>
 
       </ScrollView>
@@ -507,6 +527,13 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     marginBottom: 12,
+    borderWidth: 1.5,
+    borderColor: "#BDBDBD",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
   },
 
   label: {
@@ -542,14 +569,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
   },
-  stepperRow: {
+  sliderRow: {
     flexDirection: "row",
+    alignItems: "center",
     gap: 8,
   },
+  slider: {
+    flex: 1,
+  },
+  stepperInline: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
   stepperButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 5,
     borderWidth: 1,
     borderColor: "#BDBDBD",
     alignItems: "center",
@@ -557,7 +593,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
   },
   stepperText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "700",
     color: "#1F1F1F",
   },

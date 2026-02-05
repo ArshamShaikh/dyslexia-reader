@@ -19,7 +19,7 @@ import { speakText, stopSpeech } from "../services/ttsService";
 import { splitIntoLines } from "../utils/textParser";
 import { THEMES } from "../theme/colors";
 import { FONT_FAMILY_MAP } from "../theme/typography";
-import { addSavedText } from "../services/storageService";
+import { addSavedText, isTextSaved } from "../services/storageService";
 
 
 export default function ReaderScreen({ route, navigation }) {
@@ -29,9 +29,13 @@ export default function ReaderScreen({ route, navigation }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [saveNotice, setSaveNotice] = useState("");
+  const toastTimerRef = useRef(null);
   const [showQuickSettings, setShowQuickSettings] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [showMoreSettings, setShowMoreSettings] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [avgCharWidth, setAvgCharWidth] = useState(0);
   const timeoutRef = useRef(null);
   const scrollViewRef = useRef(null);
   const lineOffsetsRef = useRef([]);
@@ -44,7 +48,6 @@ export default function ReaderScreen({ route, navigation }) {
     wordSpacing,
     letterSpacing,
     textBoxPadding,
-    showTextBox,
     backgroundTheme,
     textColor,
     highlightStrength,
@@ -63,12 +66,20 @@ export default function ReaderScreen({ route, navigation }) {
   const resolvedFontFamily = FONT_FAMILY_MAP[fontFamily];
   const isDarkBackground = theme.background === "#121212";
   const windowWidth = Dimensions.get("window").width;
+  const measuredWidth = containerWidth || windowWidth;
   const lineHeightPx = Math.round(fontSize * lineHeight);
   const lineGap = Math.max(4, Math.round(lineHeightPx - fontSize));
-  const approxCharWidth = fontSize * 0.55 + wordSpacing * 0.25 + letterSpacing * 0.6;
+  const approxCharWidth =
+    (avgCharWidth || fontSize * 0.58) + wordSpacing * 0.22;
+  const paddingAllowance = fontSize >= 22 ? 24 : fontSize >= 18 ? 14 : 10;
+  const safetyFactor = fontSize >= 22 ? 0.86 : fontSize >= 18 ? 0.94 : 1.08;
+  const availableWidth = Math.max(
+    120,
+    measuredWidth - textBoxPadding * 2 - paddingAllowance
+  );
   const maxCharsPerLine = Math.max(
     22,
-    Math.floor((windowWidth - textBoxPadding * 2 - 48) / approxCharWidth)
+    Math.floor((availableWidth * safetyFactor) / approxCharWidth)
   );
 
   const lines = useMemo(() => {
@@ -100,6 +111,9 @@ export default function ReaderScreen({ route, navigation }) {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
     };
   }, []);
 
@@ -107,6 +121,14 @@ export default function ReaderScreen({ route, navigation }) {
     lineOffsetsRef.current = [];
     setCurrentLineIndex(-1);
     setCurrentWordIndex(-1);
+    let isActive = true;
+    setIsSaved(false);
+    isTextSaved(text).then((saved) => {
+      if (isActive) setIsSaved(saved);
+    });
+    return () => {
+      isActive = false;
+    };
   }, [text, maxCharsPerLine]);
 
   useEffect(() => {
@@ -286,9 +308,17 @@ export default function ReaderScreen({ route, navigation }) {
 
   const handleSave = async () => {
     if (!text || !text.trim()) return;
+    if (isSaved) {
+      setSaveNotice("Already saved");
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = setTimeout(() => setSaveNotice(""), 1400);
+      return;
+    }
     await addSavedText(text);
+    setIsSaved(true);
     setSaveNotice("Saved");
-    setTimeout(() => setSaveNotice(""), 1200);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setSaveNotice(""), 1400);
   };
 
   return (
@@ -336,8 +366,12 @@ export default function ReaderScreen({ route, navigation }) {
           onPress={handleSave}
           accessibilityLabel="Save text"
         >
-          <MaterialIcons name="bookmark" size={18} color="#FFFFFF" />
-          <Text style={styles.saveText}>Save</Text>
+          <MaterialIcons
+            name={isSaved ? "bookmark" : "bookmark-border"}
+            size={18}
+            color="#FFFFFF"
+          />
+          <Text style={styles.saveText}>{isSaved ? "Saved" : "Save"}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[
@@ -352,30 +386,61 @@ export default function ReaderScreen({ route, navigation }) {
         >
           <MaterialIcons name="settings" size={18} color="#FFFFFF" />
         </TouchableOpacity>
-        {!!saveNotice && (
-          <Text style={[styles.saveNotice, { color: textColor }]}>{saveNotice}</Text>
-        )}
           </>
         )}
       </View>
+      {!!saveNotice && !isFullScreen && (
+        <View style={[styles.toast, { backgroundColor: textColor }]}>
+          <Text style={[styles.toastText, { color: theme.background }]}>
+            {saveNotice}
+          </Text>
+        </View>
+      )}
 
       {/* Text Box with Internal Scrolling */}
       <View
         style={[
           styles.textContainerWrapper,
           isFullScreen && styles.textContainerWrapperFull,
-          showTextBox && !isFullScreen && styles.textContainerBox,
+          !isFullScreen && styles.textContainerBox,
           {
             padding: textBoxPadding,
-            borderColor: theme.border,
-            backgroundColor: showTextBox
-              ? theme.background === "#121212"
-                ? "rgba(255, 255, 255, 0.04)"
-                : "rgba(255, 255, 255, 0.6)"
-              : "transparent",
+            backgroundColor: isFullScreen
+              ? "transparent"
+              : theme.background === "#121212"
+                ? "#1A1A1A"
+                : "#F7F7F7",
           },
         ]}
+        onLayout={(event) => {
+          const width = event.nativeEvent.layout.width;
+          if (width && width !== containerWidth) {
+            setContainerWidth(width);
+          }
+        }}
       >
+        <Text
+          style={[
+            styles.measureText,
+            {
+              fontFamily: resolvedFontFamily,
+              fontSize,
+              letterSpacing,
+            },
+          ]}
+          onLayout={(event) => {
+            const width = event.nativeEvent.layout.width;
+            const sampleLength = styles.measureTextSample.length;
+            if (width && sampleLength) {
+              const nextAvg = width / sampleLength;
+              if (Number.isFinite(nextAvg) && nextAvg > 0) {
+                setAvgCharWidth(nextAvg);
+              }
+            }
+          }}
+        >
+          {styles.measureTextSample}
+        </Text>
         <ScrollView
           ref={scrollViewRef}
           style={styles.textScroll}
@@ -403,7 +468,7 @@ export default function ReaderScreen({ route, navigation }) {
                   {
                     backgroundColor:
                       index === currentLineIndex ? lineHighlight : "transparent",
-                    paddingHorizontal: 6,
+                    paddingHorizontal: 4,
                     paddingVertical: 2,
                     borderRadius: 3,
                     marginBottom: lineGap,
@@ -423,6 +488,7 @@ export default function ReaderScreen({ route, navigation }) {
                       color: textColor,
                       letterSpacing,
                       marginRight: wordIndex === words.length - 1 ? 0 : wordSpacing,
+                      flexShrink: 1,
                       backgroundColor:
                         index === currentLineIndex && wordIndex === currentWordIndex
                           ? wordHighlight
@@ -514,7 +580,7 @@ export default function ReaderScreen({ route, navigation }) {
                     { color: !showMoreSettings ? theme.background : textColor },
                   ]}
                 >
-                  Quick
+                  Basic
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -541,24 +607,26 @@ export default function ReaderScreen({ route, navigation }) {
               contentContainerStyle={styles.quickScrollContent}
               showsVerticalScrollIndicator={true}
             >
-            <View style={styles.quickRow}>
-              <Text style={[styles.quickLabel, { color: textColor }]}>Theme</Text>
-              <View style={styles.quickToggleRow}>
-                <Text style={[styles.quickHint, { color: textColor }]}>Light</Text>
-                <Switch
-                  value={backgroundTheme === "dark"}
-                  onValueChange={(value) =>
-                    setBackgroundTheme(value ? "dark" : "light")
-                  }
-                  trackColor={{ false: "#BDBDBD", true: textColor }}
-                  thumbColor={backgroundTheme === "dark" ? theme.background : "#F4F4F4"}
-                />
-                <Text style={[styles.quickHint, { color: textColor }]}>Dark</Text>
+            {!showMoreSettings && (
+              <View style={styles.quickRow}>
+                <Text style={[styles.quickLabel, { color: textColor }]}>Theme</Text>
+                <View style={styles.quickToggleRow}>
+                  <Text style={[styles.quickHint, { color: textColor }]}>Light</Text>
+                  <Switch
+                    value={backgroundTheme === "dark"}
+                    onValueChange={(value) =>
+                      setBackgroundTheme(value ? "dark" : "light")
+                    }
+                    trackColor={{ false: "#BDBDBD", true: textColor }}
+                    thumbColor={backgroundTheme === "dark" ? theme.background : "#F4F4F4"}
+                  />
+                  <Text style={[styles.quickHint, { color: textColor }]}>Dark</Text>
+                </View>
               </View>
-            </View>
+            )}
 
             {showMoreSettings && (
-              <View style={styles.quickRow}>
+              <View style={[styles.quickRow, styles.quickRowSpacing]}>
                 <Text style={[styles.quickLabel, { color: textColor }]}>Font</Text>
                 <View style={styles.quickChipRow}>
                   {["Lexend", "OpenDyslexic", "System"].map((font) => {
@@ -576,7 +644,10 @@ export default function ReaderScreen({ route, navigation }) {
                         <Text
                           style={[
                             styles.quickChipText,
-                            { color: isActive ? theme.background : textColor },
+                            {
+                              color: isActive ? theme.background : textColor,
+                              fontFamily: FONT_FAMILY_MAP[font] || undefined,
+                            },
                           ]}
                         >
                           {font}
@@ -593,7 +664,20 @@ export default function ReaderScreen({ route, navigation }) {
                 <Text style={[styles.quickLabel, { color: textColor }]}>
                   Font Size: {fontSize.toFixed(0)}
                 </Text>
-                <View style={styles.quickStepper}>
+              </View>
+              <View style={styles.quickSliderRow}>
+                <Slider
+                  style={styles.quickSlider}
+                  minimumValue={14}
+                  maximumValue={26}
+                  step={1}
+                  value={fontSize}
+                  onValueChange={(value) => setFontSize(value)}
+                  minimumTrackTintColor={textColor}
+                  maximumTrackTintColor={theme.border}
+                  thumbTintColor={textColor}
+                />
+                <View style={styles.quickStepperInline}>
                   <TouchableOpacity
                     style={styles.quickStepButton}
                     onPress={() => setFontSize((v) => stepAdjust(v, 1, 14, 26, -1))}
@@ -608,16 +692,6 @@ export default function ReaderScreen({ route, navigation }) {
                   </TouchableOpacity>
                 </View>
               </View>
-              <Slider
-                minimumValue={14}
-                maximumValue={26}
-                step={1}
-                value={fontSize}
-                onValueChange={(value) => setFontSize(value)}
-                minimumTrackTintColor={textColor}
-                maximumTrackTintColor={theme.border}
-                thumbTintColor={textColor}
-              />
             </View>
 
             <View style={styles.quickRow}>
@@ -625,7 +699,20 @@ export default function ReaderScreen({ route, navigation }) {
                 <Text style={[styles.quickLabel, { color: textColor }]}>
                   Line Spacing: {lineHeight.toFixed(2)}
                 </Text>
-                <View style={styles.quickStepper}>
+              </View>
+              <View style={styles.quickSliderRow}>
+                <Slider
+                  style={styles.quickSlider}
+                  minimumValue={1.2}
+                  maximumValue={2.0}
+                  step={0.05}
+                  value={lineHeight}
+                  onValueChange={(value) => setLineHeight(Number(value.toFixed(2)))}
+                  minimumTrackTintColor={textColor}
+                  maximumTrackTintColor={theme.border}
+                  thumbTintColor={textColor}
+                />
+                <View style={styles.quickStepperInline}>
                   <TouchableOpacity
                     style={styles.quickStepButton}
                     onPress={() =>
@@ -644,16 +731,6 @@ export default function ReaderScreen({ route, navigation }) {
                   </TouchableOpacity>
                 </View>
               </View>
-              <Slider
-                minimumValue={1.2}
-                maximumValue={2.0}
-                step={0.05}
-                value={lineHeight}
-                onValueChange={(value) => setLineHeight(Number(value.toFixed(2)))}
-                minimumTrackTintColor={textColor}
-                maximumTrackTintColor={theme.border}
-                thumbTintColor={textColor}
-              />
             </View>
 
             {showMoreSettings && (
@@ -664,7 +741,20 @@ export default function ReaderScreen({ route, navigation }) {
                   <Text style={[styles.quickLabel, { color: textColor }]}>
                     Word Spacing: {wordSpacing.toFixed(0)}pt
                   </Text>
-                  <View style={styles.quickStepper}>
+                </View>
+                <View style={styles.quickSliderRow}>
+                  <Slider
+                    style={styles.quickSlider}
+                    minimumValue={2}
+                    maximumValue={12}
+                    step={1}
+                    value={wordSpacing}
+                    onValueChange={(value) => setWordSpacing(value)}
+                    minimumTrackTintColor={textColor}
+                    maximumTrackTintColor={theme.border}
+                    thumbTintColor={textColor}
+                  />
+                  <View style={styles.quickStepperInline}>
                     <TouchableOpacity
                       style={styles.quickStepButton}
                       onPress={() => setWordSpacing((v) => stepAdjust(v, 1, 2, 12, -1))}
@@ -679,16 +769,6 @@ export default function ReaderScreen({ route, navigation }) {
                     </TouchableOpacity>
                   </View>
                 </View>
-                <Slider
-                  minimumValue={2}
-                  maximumValue={12}
-                  step={1}
-                  value={wordSpacing}
-                  onValueChange={(value) => setWordSpacing(value)}
-                  minimumTrackTintColor={textColor}
-                  maximumTrackTintColor={theme.border}
-                  thumbTintColor={textColor}
-                />
               </View>
             )}
 
@@ -698,7 +778,20 @@ export default function ReaderScreen({ route, navigation }) {
                   <Text style={[styles.quickLabel, { color: textColor }]}>
                     Letter Spacing: {letterSpacing.toFixed(2)}
                   </Text>
-                  <View style={styles.quickStepper}>
+                </View>
+                <View style={styles.quickSliderRow}>
+                  <Slider
+                    style={styles.quickSlider}
+                    minimumValue={0.1}
+                    maximumValue={1.0}
+                    step={0.05}
+                    value={letterSpacing}
+                    onValueChange={(value) => setLetterSpacing(Number(value.toFixed(2)))}
+                    minimumTrackTintColor={textColor}
+                    maximumTrackTintColor={theme.border}
+                    thumbTintColor={textColor}
+                  />
+                  <View style={styles.quickStepperInline}>
                     <TouchableOpacity
                       style={styles.quickStepButton}
                       onPress={() =>
@@ -717,16 +810,6 @@ export default function ReaderScreen({ route, navigation }) {
                     </TouchableOpacity>
                   </View>
                 </View>
-                <Slider
-                  minimumValue={0.1}
-                  maximumValue={1.0}
-                  step={0.05}
-                  value={letterSpacing}
-                  onValueChange={(value) => setLetterSpacing(Number(value.toFixed(2)))}
-                  minimumTrackTintColor={textColor}
-                  maximumTrackTintColor={theme.border}
-                  thumbTintColor={textColor}
-                />
               </View>
             )}
 
@@ -736,7 +819,20 @@ export default function ReaderScreen({ route, navigation }) {
                   <Text style={[styles.quickLabel, { color: textColor }]}>
                     Highlight Strength: {Math.round(highlightStrength * 100)}%
                   </Text>
-                  <View style={styles.quickStepper}>
+                </View>
+                <View style={styles.quickSliderRow}>
+                  <Slider
+                    style={styles.quickSlider}
+                    minimumValue={0.2}
+                    maximumValue={1.0}
+                    step={0.1}
+                    value={highlightStrength}
+                    onValueChange={(value) => setHighlightStrength(Number(value.toFixed(2)))}
+                    minimumTrackTintColor={textColor}
+                    maximumTrackTintColor={theme.border}
+                    thumbTintColor={textColor}
+                  />
+                  <View style={styles.quickStepperInline}>
                     <TouchableOpacity
                       style={styles.quickStepButton}
                       onPress={() =>
@@ -755,16 +851,6 @@ export default function ReaderScreen({ route, navigation }) {
                     </TouchableOpacity>
                   </View>
                 </View>
-                <Slider
-                  minimumValue={0.2}
-                  maximumValue={1.0}
-                  step={0.1}
-                  value={highlightStrength}
-                  onValueChange={(value) => setHighlightStrength(Number(value.toFixed(2)))}
-                  minimumTrackTintColor={textColor}
-                  maximumTrackTintColor={theme.border}
-                  thumbTintColor={textColor}
-                />
               </View>
             )}
               </>
@@ -837,6 +923,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
   },
+  toast: {
+    position: "absolute",
+    top: 56,
+    alignSelf: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    zIndex: 3,
+  },
+  toastText: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
   settingsButton: {
     marginLeft: 8,
     width: 36,
@@ -859,6 +958,11 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 12,
     borderWidth: 1,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 6,
   },
   quickTabs: {
     flexDirection: "row",
@@ -888,6 +992,9 @@ const styles = StyleSheet.create({
   quickRow: {
     gap: 6,
   },
+  quickRowSpacing: {
+    marginBottom: 8,
+  },
   quickRowHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -912,30 +1019,42 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   quickChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderRadius: 999,
     borderWidth: 1,
+    minHeight: 28,
+    justifyContent: "center",
+    alignItems: "center",
   },
   quickChipText: {
     fontSize: 12,
     fontWeight: "600",
   },
-  quickStepper: {
+  quickSliderRow: {
     flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  quickSlider: {
+    flex: 1,
+  },
+  quickStepperInline: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
   },
   quickStepButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 5,
     borderWidth: 1,
     borderColor: "#BDBDBD",
     alignItems: "center",
     justifyContent: "center",
   },
   quickStepText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "700",
   },
   textContainerWrapper: {
@@ -959,14 +1078,26 @@ const styles = StyleSheet.create({
     overflow: "visible",
   },
   textContainerBox: {
-    borderWidth: 2,
-    borderRadius: 10,
+    borderRadius: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 3,
   },
   line: {
     flexDirection: "row",
     alignItems: "center",
+    flexWrap: "wrap",
+    maxWidth: "100%",
   },
   paragraphSpacer: {
     height: 8,
   },
+  measureText: {
+    position: "absolute",
+    opacity: 0,
+    height: 0,
+  },
+  measureTextSample: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
 });

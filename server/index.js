@@ -5,7 +5,7 @@ import multer from "multer";
 import { extractTextFromImage, extractTextFromPdf } from "./googleVision.js";
 
 const app = express();
-const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } });
+const upload = multer({ limits: { fileSize: 25 * 1024 * 1024 } });
 
 app.use(cors());
 app.use(express.json());
@@ -22,6 +22,7 @@ app.post("/ocr", upload.single("file"), async (req, res) => {
     const text = await extractTextFromImage(req.file.buffer);
     return res.json({ text });
   } catch (error) {
+    console.error("OCR error:", error);
     return res.status(500).json({ error: "OCR failed" });
   }
 });
@@ -34,6 +35,7 @@ app.post("/pdf", upload.single("file"), async (req, res) => {
     const text = await extractTextFromPdf(req.file.buffer);
     return res.json({ text });
   } catch (error) {
+    console.error("PDF error:", error);
     return res.status(500).json({ error: "PDF extraction failed" });
   }
 });
