@@ -28,7 +28,6 @@ export default function SettingsScreen() {
     setReadingSpeed,
     backgroundTheme,
     setBackgroundTheme,
-    setTextColor,
     highlightStrength,
     setHighlightStrength,
     fontFamily,
@@ -80,7 +79,6 @@ export default function SettingsScreen() {
                   ]}
                   onPress={() => {
                     setBackgroundTheme(themeKey);
-                    setTextColor(THEMES[themeKey].text);
                   }}
                   accessibilityLabel={`Theme ${themeKey}`}
                 >
@@ -261,8 +259,8 @@ export default function SettingsScreen() {
         <View style={styles.sliderRow}>
           <Slider
             style={styles.slider}
-            minimumValue={1.2}
-            maximumValue={2.0}
+            minimumValue={1.1}
+            maximumValue={2.6}
             step={0.05}
             value={lineHeight}
             onValueChange={(value) =>
@@ -276,7 +274,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
               onPress={() =>
-                setLineHeight((prev) => stepAdjust(prev, 0.05, 1.2, 2.0, -1))
+                setLineHeight((prev) => stepAdjust(prev, 0.05, 1.1, 2.6, -1))
               }
               accessibilityLabel="Decrease line spacing"
             >
@@ -285,7 +283,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
               onPress={() =>
-                setLineHeight((prev) => stepAdjust(prev, 0.05, 1.2, 2.0, 1))
+                setLineHeight((prev) => stepAdjust(prev, 0.05, 1.1, 2.6, 1))
               }
               accessibilityLabel="Increase line spacing"
             >
@@ -313,7 +311,7 @@ export default function SettingsScreen() {
         <View style={styles.sliderRow}>
           <Slider
             style={styles.slider}
-            minimumValue={2}
+            minimumValue={0}
             maximumValue={12}
             step={1}
             value={wordSpacing}
@@ -326,7 +324,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
               onPress={() =>
-                setWordSpacing((prev) => stepAdjust(prev, 1, 2, 12, -1))
+                setWordSpacing((prev) => stepAdjust(prev, 1, 0, 12, -1))
               }
               accessibilityLabel="Decrease word spacing"
             >
@@ -335,7 +333,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
               onPress={() =>
-                setWordSpacing((prev) => stepAdjust(prev, 1, 2, 12, 1))
+                setWordSpacing((prev) => stepAdjust(prev, 1, 0, 12, 1))
               }
               accessibilityLabel="Increase word spacing"
             >
@@ -363,8 +361,8 @@ export default function SettingsScreen() {
         <View style={styles.sliderRow}>
           <Slider
             style={styles.slider}
-            minimumValue={0.1}
-            maximumValue={1.0}
+            minimumValue={0}
+            maximumValue={1.2}
             step={0.05}
             value={letterSpacing}
             onValueChange={(value) =>
@@ -378,7 +376,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
               onPress={() =>
-                setLetterSpacing((prev) => stepAdjust(prev, 0.05, 0.1, 1.0, -1))
+                setLetterSpacing((prev) => stepAdjust(prev, 0.05, 0, 1.2, -1))
               }
               accessibilityLabel="Decrease letter spacing"
             >
@@ -387,7 +385,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
               onPress={() =>
-                setLetterSpacing((prev) => stepAdjust(prev, 0.05, 0.1, 1.0, 1))
+                setLetterSpacing((prev) => stepAdjust(prev, 0.05, 0, 1.2, 1))
               }
               accessibilityLabel="Increase letter spacing"
             >
@@ -415,8 +413,8 @@ export default function SettingsScreen() {
         <View style={styles.sliderRow}>
           <Slider
             style={styles.slider}
-            minimumValue={8}
-            maximumValue={24}
+            minimumValue={6}
+            maximumValue={36}
             step={1}
             value={textBoxPadding}
             onValueChange={(value) => setTextBoxPadding(value)}
@@ -428,7 +426,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
               onPress={() =>
-                setTextBoxPadding((prev) => stepAdjust(prev, 1, 8, 24, -1))
+                setTextBoxPadding((prev) => stepAdjust(prev, 1, 6, 36, -1))
               }
               accessibilityLabel="Decrease text box padding"
             >
@@ -437,7 +435,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
               onPress={() =>
-                setTextBoxPadding((prev) => stepAdjust(prev, 1, 8, 24, 1))
+                setTextBoxPadding((prev) => stepAdjust(prev, 1, 6, 36, 1))
               }
               accessibilityLabel="Increase text box padding"
             >
@@ -466,7 +464,7 @@ export default function SettingsScreen() {
           <Slider
             style={styles.slider}
             minimumValue={0.3}
-            maximumValue={1.0}
+            maximumValue={2.0}
             step={0.05}
             value={readingSpeed}
             onValueChange={(value) =>
@@ -480,7 +478,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
               onPress={() =>
-                setReadingSpeed((prev) => stepAdjust(prev, 0.05, 0.3, 1.0, -1))
+                setReadingSpeed((prev) => stepAdjust(prev, 0.05, 0.3, 2.0, -1))
               }
               accessibilityLabel="Decrease reading speed"
             >
@@ -489,7 +487,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
               onPress={() =>
-                setReadingSpeed((prev) => stepAdjust(prev, 0.05, 0.3, 1.0, 1))
+                setReadingSpeed((prev) => stepAdjust(prev, 0.05, 0.3, 2.0, 1))
               }
               accessibilityLabel="Increase reading speed"
             >

@@ -9,8 +9,9 @@ import { THEMES } from "../theme/colors";
 
 export default function SavedScreen({ navigation }) {
   const [savedTexts, setSavedTexts] = useState([]);
-  const { backgroundTheme, textColor } = useSettings();
+  const { backgroundTheme } = useSettings();
   const theme = THEMES[backgroundTheme] || THEMES.light;
+  const uiTextColor = theme.text;
 
   const loadSavedTexts = useCallback(() => {
     getSavedTexts().then(setSavedTexts);
@@ -29,10 +30,10 @@ export default function SavedScreen({ navigation }) {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
-      <Text style={[styles.title, { color: textColor }]}>Saved Texts</Text>
+      <Text style={[styles.title, { color: uiTextColor }]}>Saved Texts</Text>
       {savedTexts.length === 0 ? (
         <View style={styles.emptyState}>
-          <Text style={[styles.emptyText, { color: textColor }]}>
+          <Text style={[styles.emptyText, { color: uiTextColor }]}>
             You have no saved passages yet.
           </Text>
         </View>
@@ -55,10 +56,10 @@ export default function SavedScreen({ navigation }) {
               <TouchableOpacity
                 onPress={() => navigation.navigate("Reader", { text: item.text })}
               >
-                <Text style={[styles.cardTitle, { color: textColor }]}>
+                <Text style={[styles.cardTitle, { color: uiTextColor }]}>
                   {item.title}
                 </Text>
-                <Text style={[styles.cardPreview, { color: textColor }]} numberOfLines={2}>
+                <Text style={[styles.cardPreview, { color: uiTextColor }]} numberOfLines={2}>
                   {item.text}
                 </Text>
               </TouchableOpacity>

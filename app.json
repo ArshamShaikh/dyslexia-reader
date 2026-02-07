@@ -1,5 +1,6 @@
 {
   "expo": {
+    "jsEngine": "hermes",
     "name": "dyslexia-reader",
     "slug": "dyslexia-reader",
     "version": "1.0.0",

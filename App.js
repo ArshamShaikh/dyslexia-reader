@@ -16,18 +16,18 @@ const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 function MainTabs() {
-  const { backgroundTheme, textColor } = useSettings();
+  const { backgroundTheme } = useSettings();
   const theme = THEMES[backgroundTheme] || THEMES.light;
 
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarActiveTintColor: textColor,
+        tabBarActiveTintColor: theme.text,
         tabBarInactiveTintColor: backgroundTheme === "dark" ? "#B5B5B5" : "#777",
         tabBarStyle: {
           backgroundColor:
-            theme.background === "#121212" ? "rgba(32, 32, 32, 0.98)" : "#FFFFFF",
+            theme.background === "#121212" ? "rgba(32, 32, 32, 0.98)" : theme.highlight,
           borderTopColor: theme.border,
         },
         tabBarIcon: ({ color, size }) => {

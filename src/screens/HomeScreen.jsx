@@ -3,6 +3,7 @@ import { MaterialIcons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import { useMemo, useState } from "react";
 import {
+    ActivityIndicator,
     Alert,
     Platform,
     StyleSheet,
@@ -14,19 +15,26 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSettings } from "../context/SettingsContext";
 import { THEMES } from "../theme/colors";
-import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
 import DocumentScanner from "react-native-document-scanner-plugin";
+import { cleanOcrText } from "../utils/ocrCleaner";
 
 export default function HomeScreen({ navigation }) {
   const [inputText, setInputText] = useState("");
   const [textInputHeight, setTextInputHeight] = useState(120);
   const [isUploading, setIsUploading] = useState(false);
-  const { backgroundTheme, textColor } = useSettings();
+  const [statusMessage, setStatusMessage] = useState("");
+  const { backgroundTheme } = useSettings();
   const theme = THEMES[backgroundTheme] || THEMES.light;
+  const uiTextColor = theme.text;
   const apiBaseUrl = useMemo(() => {
+    // Prefer localhost for dev builds on real Android devices when using adb reverse.
+    if (Platform.OS === "android" && Constants.appOwnership !== "expo") {
+      return "http://localhost:5050";
+    }
+
     const hostUri =
       Constants.expoConfig?.hostUri ||
       Constants.manifest?.debuggerHost ||
@@ -38,23 +46,21 @@ export default function HomeScreen({ navigation }) {
     if (Platform.OS === "android") return "http://10.0.2.2:5050";
     return "http://localhost:5050";
   }, []);
+  const MAX_READER_CHARS = 20000;
 
   const handleContentSizeChange = (event) => {
     const height = Math.min(event.nativeEvent.contentSize.height, 300);
     setTextInputHeight(Math.max(120, height));
   };
-  const handlePasteFromClipboard = async () => {
-    const text = await Clipboard.getStringAsync();
-    if (!text) {
-      Alert.alert("Clipboard is empty", "Copy some text and try again.");
-      return;
-    }
-    setInputText(text);
-  };
-
   const handlePickFile = async () => {
     const result = await DocumentPicker.getDocumentAsync({
-      type: ["text/plain", "text/*"],
+      type: [
+        "text/plain",
+        "text/*",
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "image/*",
+      ],
       copyToCacheDirectory: true,
     });
     if (result.canceled) return;
@@ -63,14 +69,87 @@ export default function HomeScreen({ navigation }) {
     if (!file) return;
 
     try {
+      const nameLower = file.name?.toLowerCase() || "";
+      const uriLower = file.uri?.toLowerCase() || "";
+      const isPdf =
+        file.mimeType === "application/pdf" ||
+        file.mimeType?.includes("pdf") ||
+        nameLower.endsWith(".pdf") ||
+        uriLower.endsWith(".pdf");
+      const isDocx =
+        file.mimeType ===
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+        file.mimeType?.includes("officedocument.wordprocessingml.document") ||
+        nameLower.endsWith(".docx") ||
+        uriLower.endsWith(".docx");
+      const isImage =
+        file.mimeType?.startsWith("image/") ||
+        [".jpg", ".jpeg", ".png", ".webp", ".heic"].some((ext) =>
+          nameLower.endsWith(ext) || uriLower.endsWith(ext)
+        );
+
+      if (isPdf) {
+        setIsUploading(true);
+        setStatusMessage("Uploading PDF...");
+        const text = await uploadAsset("pdf", file);
+        const cleaned = cleanOcrText(text);
+        if (!cleaned) {
+          Alert.alert("No text found", "This PDF looks scanned. OCR for scanned PDFs is coming next.");
+          return;
+        }
+        setInputText(cleaned);
+        return;
+      }
+
+      if (isDocx) {
+        setIsUploading(true);
+        setStatusMessage("Uploading document...");
+        const text = await uploadAsset("docx", file);
+        const cleaned = cleanOcrText(text);
+        if (!cleaned) {
+          Alert.alert("No text found", "This document might be empty.");
+          return;
+        }
+        setInputText(cleaned);
+        return;
+      }
+
+      if (isImage) {
+        setIsUploading(true);
+        setStatusMessage("Uploading image for OCR...");
+        const text = await uploadAsset("ocr", file);
+        const cleaned = cleanOcrText(text);
+        if (!cleaned) {
+          Alert.alert("No text detected", "Try a clearer image.");
+          return;
+        }
+        setInputText(cleaned);
+        return;
+      }
+
       const content = await FileSystem.readAsStringAsync(file.uri);
       if (!content) {
         Alert.alert("File is empty", "Please choose a file with text.");
         return;
       }
-      setInputText(content);
+      setInputText(cleanOcrText(content));
     } catch (error) {
-      Alert.alert("Couldn't open file", "Try a different file.");
+      try {
+        setIsUploading(true);
+        setStatusMessage("Uploading file...");
+        const text = await uploadAsset("pdf", file);
+        const cleaned = cleanOcrText(text);
+        if (!cleaned) {
+          Alert.alert("No text found", "This PDF looks scanned. OCR for scanned PDFs is coming next.");
+          return;
+        }
+        setInputText(cleaned);
+      } catch (uploadError) {
+        Alert.alert("Couldn't open file", uploadError?.message || "Try a different file.");
+      }
+    } finally {
+      setIsUploading(false);
+      setStatusMessage("");
     }
   };
 
@@ -89,15 +168,21 @@ export default function HomeScreen({ navigation }) {
       });
     }
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
     const response = await fetch(`${apiBaseUrl}/${endpoint}`, {
       method: "POST",
       body: formData,
       headers: {
         "Content-Type": "multipart/form-data",
       },
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
     if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
+      const payload = await response.json().catch(() => ({}));
+      const message = payload?.error || `Request failed: ${response.status}`;
+      throw new Error(message);
     }
     const data = await response.json();
     return data?.text?.trim() || "";
@@ -113,31 +198,46 @@ export default function HomeScreen({ navigation }) {
       if (result.canceled) return;
       asset = result.assets?.[0];
     } else {
-      try {
-        const { scannedImages } = await DocumentScanner.scanDocument({
-          maxNumDocuments: 1,
-          responseType: "imageFilePath",
-        });
-        const scanPath = scannedImages?.[0];
-        if (scanPath) {
-          asset = {
-            uri: scanPath,
-            name: "scan.jpg",
-            mimeType: "image/jpeg",
-          };
-        }
-      } catch (error) {
-        // Fall back to camera if scanner fails
-      }
+      const choice = await new Promise((resolve) => {
+        Alert.alert(
+          "Scan text",
+          "Choose an option",
+          [
+            { text: "Take photo", onPress: () => resolve("camera") },
+            { text: "Choose image", onPress: () => resolve("gallery") },
+            { text: "Cancel", style: "cancel", onPress: () => resolve(null) },
+          ]
+        );
+      });
 
-      if (!asset) {
-        const permission = await ImagePicker.requestCameraPermissionsAsync();
-        if (permission.status !== "granted") {
-          Alert.alert("Camera permission needed", "Allow camera access to scan pages.");
+      if (!choice) return;
+
+      if (choice === "camera") {
+        try {
+          setStatusMessage("Opening scanner...");
+          const { scannedImages } = await DocumentScanner.scanDocument({
+            maxNumDocuments: 1,
+            responseType: "imageFilePath",
+          });
+          const scanPath = scannedImages?.[0];
+          if (scanPath) {
+            asset = {
+              uri: scanPath,
+              name: "scan.jpg",
+              mimeType: "image/jpeg",
+            };
+          } else {
+            setStatusMessage("");
+            return;
+          }
+        } catch (error) {
+          Alert.alert("Scanner failed", "Try again or choose an image instead.");
+          setStatusMessage("");
           return;
         }
-        const result = await ImagePicker.launchCameraAsync({
-          quality: 0.8,
+      } else if (choice === "gallery") {
+        const result = await ImagePicker.launchImageLibraryAsync({
+          quality: 0.9,
         });
         if (result.canceled) return;
         asset = result.assets?.[0];
@@ -148,54 +248,32 @@ export default function HomeScreen({ navigation }) {
 
     try {
       setIsUploading(true);
+      setStatusMessage("Uploading for OCR...");
       const normalizedAsset = {
         uri: asset.uri,
         name: asset.fileName || asset.name || "scan.jpg",
         mimeType: asset.mimeType || "image/jpeg",
       };
       const text = await uploadAsset("ocr", normalizedAsset);
-      if (!text) {
+      const cleaned = cleanOcrText(text);
+      if (!cleaned) {
         Alert.alert("No text detected", "Try a clearer image.");
         return;
       }
-      setInputText(text);
+      setInputText(cleaned);
     } catch (error) {
-      Alert.alert("OCR failed", "Check the server and try again.");
+      Alert.alert("OCR failed", error?.message || "Check the server and try again.");
     } finally {
       setIsUploading(false);
-    }
-  };
-
-  const handlePDF = async () => {
-    const result = await DocumentPicker.getDocumentAsync({
-      type: ["application/pdf"],
-      copyToCacheDirectory: true,
-    });
-    if (result.canceled) return;
-
-    const asset = result.assets?.[0];
-    if (!asset) return;
-
-    try {
-      setIsUploading(true);
-      const text = await uploadAsset("pdf", asset);
-      if (!text) {
-        Alert.alert("No text found", "This PDF might be scanned or empty.");
-        return;
-      }
-      setInputText(text);
-    } catch (error) {
-      Alert.alert("PDF extraction failed", "Check the server and try again.");
-    } finally {
-      setIsUploading(false);
+      setStatusMessage("");
     }
   };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
       <View style={styles.headerContainer}>
-        <Text style={[styles.title, { color: textColor }]}>Dyslexia Reader</Text>
-        <Text style={[styles.subtitle, { color: textColor }]}>
+        <Text style={[styles.title, { color: uiTextColor }]}>Dyslexia Reader</Text>
+        <Text style={[styles.subtitle, { color: uiTextColor }]}>
           Accessible Reading for Every Learner
         </Text>
       </View>
@@ -207,7 +285,7 @@ export default function HomeScreen({ navigation }) {
           styles.cardSurface,
           {
             borderColor: theme.border,
-            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : theme.highlight,
           },
         ]}
       >
@@ -216,7 +294,7 @@ export default function HomeScreen({ navigation }) {
             styles.textInput,
             {
               height: textInputHeight,
-              color: textColor,
+              color: uiTextColor,
               borderColor: "transparent",
               backgroundColor: "transparent",
             },
@@ -228,20 +306,59 @@ export default function HomeScreen({ navigation }) {
           onChangeText={setInputText}
           onContentSizeChange={handleContentSizeChange}
         />
+        {inputText.trim().length > 0 && (
+          <TouchableOpacity
+            style={[
+              styles.clearButton,
+              {
+                backgroundColor:
+                  theme.background === "#121212" ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)",
+              },
+            ]}
+            onPress={() => {
+              setInputText("");
+              setTextInputHeight(120);
+            }}
+            accessibilityLabel="Clear text"
+          >
+            <MaterialIcons name="close" size={16} color={uiTextColor} />
+            <Text style={[styles.clearButtonText, { color: uiTextColor }]}>Clear</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={[
             styles.playButton,
-            { backgroundColor: theme.background === "#121212" ? "#333333" : "#1F1F1F" },
+            {
+              backgroundColor: theme.background === "#121212" ? "#333333" : theme.highlight,
+              borderColor: theme.border,
+              borderWidth: 1,
+            },
           ]}
-          onPress={() =>
-            navigation.navigate("Reader", {
-              text: inputText || "Sample reading text will appear here.",
-            })
-          }
+          onPress={() => {
+            const rawText = inputText || "Sample reading text will appear here.";
+            if (rawText.length > MAX_READER_CHARS) {
+              Alert.alert(
+                "Large document",
+                `This text is very long. To keep reading smooth, we will open the first ${MAX_READER_CHARS.toLocaleString()} characters.`,
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Continue",
+                    onPress: () =>
+                      navigation.navigate("Reader", {
+                        text: rawText.slice(0, MAX_READER_CHARS),
+                      }),
+                  },
+                ]
+              );
+              return;
+            }
+            navigation.navigate("Reader", { text: rawText });
+          }}
           accessible={true}
           accessibilityLabel="Start reading"
         >
-          <MaterialIcons name="play-arrow" size={24} color="#FFFFFF" />
+          <MaterialIcons name="play-arrow" size={24} color={uiTextColor} />
         </TouchableOpacity>
       </View>
 
@@ -251,7 +368,7 @@ export default function HomeScreen({ navigation }) {
           styles.cardSurface,
           {
             borderColor: theme.border,
-            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : theme.highlight,
           },
         ]}
       >
@@ -261,15 +378,15 @@ export default function HomeScreen({ navigation }) {
             {
               borderColor: theme.border,
               backgroundColor:
-                theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+                theme.background === "#121212" ? "#1C1C1C" : theme.highlight,
             },
           ]}
           onPress={handlePickFile}
           disabled={isUploading}
           accessibilityLabel="Attach file"
         >
-          <MaterialIcons name="attach-file" size={22} color={textColor} />
-          <Text style={[styles.actionLabel, { color: textColor }]}>File</Text>
+          <MaterialIcons name="folder-open" size={22} color={uiTextColor} />
+          <Text style={[styles.actionLabel, { color: uiTextColor }]}>File</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[
@@ -277,54 +394,36 @@ export default function HomeScreen({ navigation }) {
             {
               borderColor: theme.border,
               backgroundColor:
-                theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
-            },
-          ]}
-          onPress={handlePDF}
-          disabled={isUploading}
-          accessibilityLabel="PDF import"
-        >
-          <MaterialIcons name="picture-as-pdf" size={22} color={textColor} />
-          <Text style={[styles.actionLabel, { color: textColor }]}>PDF</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.actionButton,
-            {
-              borderColor: theme.border,
-              backgroundColor:
-                theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+                theme.background === "#121212" ? "#1C1C1C" : theme.highlight,
             },
           ]}
           onPress={handleOCR}
           disabled={isUploading}
           accessibilityLabel="Scan text"
         >
-          <MaterialIcons name="document-scanner" size={22} color={textColor} />
-          <Text style={[styles.actionLabel, { color: textColor }]}>Scan</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.actionButton,
-            {
-              borderColor: theme.border,
-              backgroundColor:
-                theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
-            },
-          ]}
-          onPress={handlePasteFromClipboard}
-          disabled={isUploading}
-          accessibilityLabel="Paste from clipboard"
-        >
-          <MaterialIcons name="content-paste" size={22} color={textColor} />
-          <Text style={[styles.actionLabel, { color: textColor }]}>Paste</Text>
+          <MaterialIcons name="document-scanner" size={22} color={uiTextColor} />
+          <Text style={[styles.actionLabel, { color: uiTextColor }]}>Scan</Text>
         </TouchableOpacity>
       </View>
 
       <View style={styles.placeholderFeature}>
-        <Text style={[styles.placeholderText, { color: textColor }]}>
-          {isUploading ? "Uploading..." : "More input options coming soon"}
-        </Text>
+        {(isUploading || statusMessage) && (
+          <View
+            style={[
+              styles.uploadStatusBanner,
+              {
+                borderColor: theme.border,
+                backgroundColor:
+                  theme.background === "#121212" ? "#242424" : "#F5F5F5",
+              },
+            ]}
+          >
+            <ActivityIndicator size="small" color={uiTextColor} />
+            <Text style={[styles.uploadStatusText, { color: uiTextColor }]}>
+              {statusMessage || "Uploading..."}
+            </Text>
+          </View>
+        )}
       </View>
 
     </SafeAreaView>
@@ -397,6 +496,24 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 3,
     elevation: 4,
+    borderWidth: 1.5,
+  },
+  clearButton: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(127,127,127,0.45)",
+  },
+  clearButtonText: {
+    fontSize: 11,
+    fontWeight: "600",
   },
 
   buttonContainer: {
@@ -432,15 +549,22 @@ const styles = StyleSheet.create({
 
   placeholderFeature: {
     marginTop: 12,
-    alignItems: "center",
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: "#DDD",
+    minHeight: 40,
+    justifyContent: "center",
   },
-
-  placeholderText: {
-    color: "#888",
-    fontSize: 11,
+  uploadStatusBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "stretch",
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  uploadStatusText: {
+    fontSize: 12,
+    fontWeight: "600",
   },
   inputActions: {
     flexDirection: "row",
@@ -459,6 +583,11 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1.5,
     gap: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.12,
+    shadowRadius: 2,
+    elevation: 2,
   },
   actionLabel: {
     fontSize: 11,

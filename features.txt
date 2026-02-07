@@ -25,6 +25,8 @@ ENHANCED FEATURES (POST-MVP, HIGH IMPACT)
 Input &amp; Convenience
 19. OCR (scan text from books/images)
 20. Clean OCR text before reading
+20a. PDF native view with synced highlighting (Speechify-style) — planned
+20b. Scanned PDF OCR fallback (Vision async batch) — planned
 Guided Support
 21. Guided reading mode (short chunks)
 22. Sentence-by-sentence navigation

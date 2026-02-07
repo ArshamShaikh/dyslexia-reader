@@ -3,6 +3,19 @@ import { loadSettings, saveSettings } from "../services/storageService";
 import { THEMES } from "../theme/colors";
 
 const SettingsContext = createContext(null);
+const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+
+const LIMITS = {
+  fontSize: [14, 26],
+  lineHeight: [1.1, 2.6],
+  wordSpacing: [0, 12],
+  letterSpacing: [0, 1.2],
+  textBoxPadding: [6, 36],
+  highlightStrength: [0.2, 1.0],
+  readingSpeed: [0.3, 2.0],
+  hue: [0, 360],
+  channel: [0, 1],
+};
 
 export const SettingsProvider = ({ children }) => {
   const [fontFamily, setFontFamily] = useState("Lexend");
@@ -15,9 +28,107 @@ export const SettingsProvider = ({ children }) => {
   const [backgroundTheme, setBackgroundTheme] = useState("light");
   const [textColor, setTextColor] = useState(THEMES.light.text);
   const [highlightStrength, setHighlightStrength] = useState(0.6);
-  const [readingSpeed, setReadingSpeed] = useState(0.5);
+  const [readingSpeed, setReadingSpeed] = useState(0.6);
+  const [highlightHue, setHighlightHue] = useState(220);
+  const [textHue, setTextHue] = useState(220);
+  const [textSaturation, setTextSaturation] = useState(0.8);
+  const [textValue, setTextValue] = useState(0.2);
+  const [readingAreaHue, setReadingAreaHue] = useState(220);
+  const [highlightSaturation, setHighlightSaturation] = useState(0.9);
+  const [highlightValue, setHighlightValue] = useState(0.82);
+  const [readingAreaSaturation, setReadingAreaSaturation] = useState(0.22);
+  const [readingAreaValue, setReadingAreaValue] = useState(0.9);
   const didLoadRef = useRef(false);
   const saveTimerRef = useRef(null);
+
+  const makeSafeSetter = (setter, min, max) => (valueOrUpdater) => {
+    setter((prev) => {
+      const rawValue =
+        typeof valueOrUpdater === "function" ? valueOrUpdater(prev) : valueOrUpdater;
+      return clamp(Number(rawValue), min, max);
+    });
+  };
+
+  const setSafeFontSize = makeSafeSetter(
+    setFontSize,
+    LIMITS.fontSize[0],
+    LIMITS.fontSize[1]
+  );
+  const setSafeLineHeight = makeSafeSetter(
+    setLineHeight,
+    LIMITS.lineHeight[0],
+    LIMITS.lineHeight[1]
+  );
+  const setSafeWordSpacing = makeSafeSetter(
+    setWordSpacing,
+    LIMITS.wordSpacing[0],
+    LIMITS.wordSpacing[1]
+  );
+  const setSafeLetterSpacing = makeSafeSetter(
+    setLetterSpacing,
+    LIMITS.letterSpacing[0],
+    LIMITS.letterSpacing[1]
+  );
+  const setSafeTextBoxPadding = makeSafeSetter(
+    setTextBoxPadding,
+    LIMITS.textBoxPadding[0],
+    LIMITS.textBoxPadding[1]
+  );
+  const setSafeHighlightStrength = makeSafeSetter(
+    setHighlightStrength,
+    LIMITS.highlightStrength[0],
+    LIMITS.highlightStrength[1]
+  );
+  const setSafeReadingSpeed = makeSafeSetter(
+    setReadingSpeed,
+    LIMITS.readingSpeed[0],
+    LIMITS.readingSpeed[1]
+  );
+  const setSafeHighlightHue = makeSafeSetter(
+    setHighlightHue,
+    LIMITS.hue[0],
+    LIMITS.hue[1]
+  );
+  const setSafeTextHue = makeSafeSetter(
+    setTextHue,
+    LIMITS.hue[0],
+    LIMITS.hue[1]
+  );
+  const setSafeReadingAreaHue = makeSafeSetter(
+    setReadingAreaHue,
+    LIMITS.hue[0],
+    LIMITS.hue[1]
+  );
+  const setSafeTextSaturation = makeSafeSetter(
+    setTextSaturation,
+    LIMITS.channel[0],
+    LIMITS.channel[1]
+  );
+  const setSafeTextValue = makeSafeSetter(
+    setTextValue,
+    LIMITS.channel[0],
+    LIMITS.channel[1]
+  );
+  const setSafeHighlightSaturation = makeSafeSetter(
+    setHighlightSaturation,
+    LIMITS.channel[0],
+    LIMITS.channel[1]
+  );
+  const setSafeHighlightValue = makeSafeSetter(
+    setHighlightValue,
+    LIMITS.channel[0],
+    LIMITS.channel[1]
+  );
+  const setSafeReadingAreaSaturation = makeSafeSetter(
+    setReadingAreaSaturation,
+    LIMITS.channel[0],
+    LIMITS.channel[1]
+  );
+  const setSafeReadingAreaValue = makeSafeSetter(
+    setReadingAreaValue,
+    LIMITS.channel[0],
+    LIMITS.channel[1]
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -25,11 +136,11 @@ export const SettingsProvider = ({ children }) => {
       if (!isMounted) return;
       if (stored) {
         if (stored.fontFamily) setFontFamily(stored.fontFamily);
-        if (stored.fontSize) setFontSize(stored.fontSize);
-        if (stored.lineHeight) setLineHeight(stored.lineHeight);
-        if (stored.wordSpacing) setWordSpacing(stored.wordSpacing);
-        if (stored.letterSpacing) setLetterSpacing(stored.letterSpacing);
-        if (stored.textBoxPadding) setTextBoxPadding(stored.textBoxPadding);
+        if (stored.fontSize) setSafeFontSize(stored.fontSize);
+        if (stored.lineHeight) setSafeLineHeight(stored.lineHeight);
+        if (stored.wordSpacing !== undefined) setSafeWordSpacing(stored.wordSpacing);
+        if (stored.letterSpacing !== undefined) setSafeLetterSpacing(stored.letterSpacing);
+        if (stored.textBoxPadding) setSafeTextBoxPadding(stored.textBoxPadding);
         if (typeof stored.showTextBox === "boolean") {
           setShowTextBox(stored.showTextBox);
         }
@@ -41,14 +152,33 @@ export const SettingsProvider = ({ children }) => {
               ? normalizedTheme
               : "light";
           setBackgroundTheme(safeTheme);
-          const theme = THEMES[safeTheme] || THEMES.light;
-          setTextColor(theme.text);
         }
         if (typeof stored.highlightStrength === "number") {
-          setHighlightStrength(stored.highlightStrength);
+          setSafeHighlightStrength(stored.highlightStrength);
+        }
+        if (typeof stored.highlightHue === "number") setSafeHighlightHue(stored.highlightHue);
+        if (typeof stored.textHue === "number") setSafeTextHue(stored.textHue);
+        if (typeof stored.readingAreaHue === "number") setSafeReadingAreaHue(stored.readingAreaHue);
+        if (typeof stored.textSaturation === "number") {
+          setSafeTextSaturation(stored.textSaturation);
+        }
+        if (typeof stored.textValue === "number") {
+          setSafeTextValue(stored.textValue);
+        }
+        if (typeof stored.highlightSaturation === "number") {
+          setSafeHighlightSaturation(stored.highlightSaturation);
+        }
+        if (typeof stored.highlightValue === "number") {
+          setSafeHighlightValue(stored.highlightValue);
+        }
+        if (typeof stored.readingAreaSaturation === "number") {
+          setSafeReadingAreaSaturation(stored.readingAreaSaturation);
+        }
+        if (typeof stored.readingAreaValue === "number") {
+          setSafeReadingAreaValue(stored.readingAreaValue);
         }
         if (stored.textColor) setTextColor(stored.textColor);
-        if (stored.readingSpeed) setReadingSpeed(stored.readingSpeed);
+        if (stored.readingSpeed) setSafeReadingSpeed(stored.readingSpeed);
       }
       didLoadRef.current = true;
     });
@@ -74,6 +204,15 @@ export const SettingsProvider = ({ children }) => {
         textColor,
         highlightStrength,
         readingSpeed,
+        highlightHue,
+        textHue,
+        readingAreaHue,
+        textSaturation,
+        textValue,
+        highlightSaturation,
+        highlightValue,
+        readingAreaSaturation,
+        readingAreaValue,
       });
     }, 200);
   }, [
@@ -88,33 +227,62 @@ export const SettingsProvider = ({ children }) => {
     textColor,
     highlightStrength,
     readingSpeed,
+    highlightHue,
+    textHue,
+    readingAreaHue,
+    textSaturation,
+    textValue,
+    highlightSaturation,
+    highlightValue,
+    readingAreaSaturation,
+    readingAreaValue,
   ]);
 
+  const hsvToHex = (h, s, v) => {
+    const hue = ((Number(h) % 360) + 360) % 360;
+    const sat = clamp(Number(s), 0, 1);
+    const val = clamp(Number(v), 0, 1);
+    const c = val * sat;
+    const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+    const m = val - c;
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    if (hue < 60) [r, g, b] = [c, x, 0];
+    else if (hue < 120) [r, g, b] = [x, c, 0];
+    else if (hue < 180) [r, g, b] = [0, c, x];
+    else if (hue < 240) [r, g, b] = [0, x, c];
+    else if (hue < 300) [r, g, b] = [x, 0, c];
+    else [r, g, b] = [c, 0, x];
+    const toHex = (n) =>
+      Math.round((n + m) * 255)
+        .toString(16)
+        .padStart(2, "0");
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+  };
+
   useEffect(() => {
-    const theme = THEMES[backgroundTheme];
-    if (theme && theme.text !== textColor) {
-      setTextColor(theme.text);
-    }
-  }, [backgroundTheme]);
+    setTextColor(hsvToHex(textHue, textSaturation, textValue));
+  }, [textHue, textSaturation, textValue]);
 
   const value = {
     fontFamily,
     setFontFamily,
 
     fontSize,
-    setFontSize,
+    setFontSize: setSafeFontSize,
 
     lineHeight,
-    setLineHeight,
+    setLineHeight: setSafeLineHeight,
 
     wordSpacing,
-    setWordSpacing,
+    setWordSpacing: setSafeWordSpacing,
 
     letterSpacing,
-    setLetterSpacing,
+    setLetterSpacing: setSafeLetterSpacing,
 
     textBoxPadding,
-    setTextBoxPadding,
+    setTextBoxPadding: setSafeTextBoxPadding,
 
     showTextBox,
     setShowTextBox,
@@ -126,10 +294,28 @@ export const SettingsProvider = ({ children }) => {
     setTextColor,
 
     highlightStrength,
-    setHighlightStrength,
+    setHighlightStrength: setSafeHighlightStrength,
 
     readingSpeed,
-    setReadingSpeed,
+    setReadingSpeed: setSafeReadingSpeed,
+    highlightHue,
+    setHighlightHue: setSafeHighlightHue,
+    textHue,
+    setTextHue: setSafeTextHue,
+    textSaturation,
+    setTextSaturation: setSafeTextSaturation,
+    textValue,
+    setTextValue: setSafeTextValue,
+    readingAreaHue,
+    setReadingAreaHue: setSafeReadingAreaHue,
+    highlightSaturation,
+    setHighlightSaturation: setSafeHighlightSaturation,
+    highlightValue,
+    setHighlightValue: setSafeHighlightValue,
+    readingAreaSaturation,
+    setReadingAreaSaturation: setSafeReadingAreaSaturation,
+    readingAreaValue,
+    setReadingAreaValue: setSafeReadingAreaValue,
   };
 
   return (
