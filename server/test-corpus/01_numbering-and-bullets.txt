@@ -1,0 +1,23 @@
+SOFTWARE ENGINEERING QUESTION BANK
+
+Section A
+
+1. Explain verification and
+validation and differentiate between them
+with one real-world example.
+
+2. Explain the waterfall model with
+advantages, disadvantages, and applications.
+
+3. Write short notes on:
+- software process framework
+- umbrella activities
+- software quality assurance
+
+Section B
+
+4. Attempt any two:
+a) Define coupling and cohesion.
+b) Explain function point metrics.
+c) List any three agile values.
+

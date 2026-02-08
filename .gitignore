@@ -41,3 +41,7 @@ app-example
 # generated native folders
 /ios
 /android
+
+# extraction test artifacts
+server/tests/last-extraction-report.md
+server/test-corpus-real/

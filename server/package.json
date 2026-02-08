@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "node index.js",
-    "start": "node index.js"
+    "start": "node index.js",
+    "test:extraction": "node scripts/validateExtraction.mjs"
   },
   "dependencies": {
     "@google-cloud/vision": "^4.0.2",

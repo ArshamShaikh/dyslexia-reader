@@ -1,0 +1,19 @@
+{
+  "minChars": 350,
+  "minNumberedLines": 3,
+  "minBulletLines": 3,
+  "maxSingleWordLineRatio": 0.15,
+  "requiredContains": [
+    "software testing is the process of evaluating a system",
+    "test early and test continuously",
+    "boundary condition failures",
+    "testing improves product quality"
+  ],
+  "requiredRegex": [
+    "^CHAPTER:\\s+SOFTWARE TESTING",
+    "^Key points:",
+    "^Common defects include:",
+    "^Conclusion$"
+  ]
+}
+

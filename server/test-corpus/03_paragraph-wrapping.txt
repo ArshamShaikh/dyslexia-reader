@@ -1,0 +1,21 @@
+CHAPTER: SOFTWARE TESTING
+
+Software testing is the process of evaluating a system to identify
+defects and ensure that it meets specified requirements. A robust
+testing strategy should combine unit, integration, system, and
+acceptance testing.
+
+Key points:
+- Test early and test continuously.
+- Keep test cases clear, repeatable, and traceable.
+- Prioritize high-risk modules first.
+
+Common defects include:
+1. Boundary condition failures
+2. Incorrect business rule handling
+3. Broken user input validation
+
+Conclusion
+Testing improves product quality, reduces release risk, and
+increases confidence for students and teachers using the app.
+

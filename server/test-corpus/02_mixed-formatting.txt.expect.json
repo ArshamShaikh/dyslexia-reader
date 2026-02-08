@@ -1,0 +1,19 @@
+{
+  "minChars": 300,
+  "minNumberedLines": 3,
+  "maxSingleWordLineRatio": 0.14,
+  "requiredContains": [
+    "request for permission to conduct field visit",
+    "students of sycs 2026",
+    "roll no: 42",
+    "class representative"
+  ],
+  "requiredRegex": [
+    "^Date:\\s+10/01/2026",
+    "^Subject:\\s+Request for permission to conduct field visit and study for academic project",
+    "^1\\)\\s+Shah Saba",
+    "^2\\)\\s+Nazia Salmani",
+    "^3\\)\\s+Khan Zoya"
+  ]
+}
+

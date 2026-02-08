@@ -1,0 +1,19 @@
+{
+  "minChars": 250,
+  "minNumberedLines": 4,
+  "minBulletLines": 3,
+  "maxSingleWordLineRatio": 0.12,
+  "requiredContains": [
+    "verification and validation",
+    "waterfall model",
+    "umbrella activities",
+    "coupling and cohesion"
+  ],
+  "requiredRegex": [
+    "^1\\.\\s+Explain verification and validation",
+    "^2\\.\\s+Explain the waterfall model",
+    "^3\\.\\s+Write short notes on:",
+    "^4\\.\\s+Attempt any two:"
+  ]
+}
+
