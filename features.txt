@@ -1,5 +1,5 @@
-CORE FEATURES (MVP – MUST HAVE)
-Reading &amp; Accessibility
+CORE FEATURES (MVP - MUST HAVE)
+Reading & Accessibility
 1. Text input (paste / type)
 2. Text-to-Speech reading
 3. Play / Pause / Resume / Stop
@@ -10,11 +10,13 @@ Reading &amp; Accessibility
 8. Adjustable line spacing
 9. Background themes (white, yellow, blue, dark)
 10. Focused reading UI (minimal distractions)
+
 Usability
 11. Save text passages
 12. Reopen saved texts
 13. Persistent user settings
 14. Offline-first functionality
+
 Design Philosophy
 15. Dyslexia-first defaults
 16. No error-based feedback
@@ -22,35 +24,25 @@ Design Philosophy
 18. Psychological safety
 
 ENHANCED FEATURES (POST-MVP, HIGH IMPACT)
-Input &amp; Convenience
+Input & Convenience
 19. OCR (scan text from books/images)
 20. Clean OCR text before reading
-20a. PDF native view with synced highlighting (Speechify-style) — planned
-20b. Scanned PDF OCR fallback (Vision async batch) — planned
-Guided Support
-21. Guided reading mode (short chunks)
-22. Sentence-by-sentence navigation
-23. Repeat line / paragraph
-Personalization
-24. Track pauses / replays
-25. Suggest better speed or spacing
-
-26. Rule-based personalization (no heavy AI)
+20b. Scanned PDF OCR fallback (Vision async batch) - planned
 
 ADVANCED FEATURES (OPTIONAL, IF TIME)
-Language &amp; Comprehension
-27. Hard word detection
-28. Tap word → pronunciation
-29. Simple meaning lookup
-30. Syllable breakdown
-Analytics (Non-Judgmental)
-31. Reading time tracking
-32. Session count
-33. Progress dashboard (effort-based)
+Language & Comprehension
+21. Hard word detection
+22. Tap word -> pronunciation
+23. Simple meaning lookup
+24. Syllable breakdown
 
 BACKEND
 Supabase Integration
-34. User authentication (optional)
-35. Cloud sync for saved texts
-36. Sync settings across devices
-37. Store anonymized reading sessions
+25. User authentication (optional)
+26. Cloud sync for saved texts
+27. Sync settings across devices
+28. Store anonymized reading sessions
+
+NOTE
+Optional deferred features are tracked in:
+docs/optional-features.md
