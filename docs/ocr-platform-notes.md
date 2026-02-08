@@ -6,28 +6,21 @@ This document summarizes OCR behavior, costs, limits, and practical usage mappin
 - `Image OCR`: Implemented via backend (`/ocr`) using Google Vision.
 - `File import`: `.txt`, `.docx`, `.pdf` support added.
 - `PDF (text-based)`: Extracted via server-side text extraction.
-- `Scanned PDF fallback (20b)`: Planned (Vision async batch for image-based PDFs).
+- `Scanned PDF OCR fallback`: Planned (Vision async batch for image-based PDFs).
 
-## 2) Why 20b Exists
+## 2) Why Scanned PDF OCR Fallback Exists
 - Many PDFs are scanned images, not selectable text.
 - Normal PDF extraction returns empty/poor output for those files.
-- `20b` runs OCR page-by-page on scanned PDFs and returns readable text to the custom reader UI.
+- Scanned PDF OCR fallback runs OCR page-by-page on scanned PDFs and returns readable text to the custom reader UI.
 
-## 3) Google Vision OCR Pricing (with INR planning values)
+## 3) Google Vision OCR Pricing (INR planning values)
 
 Vision bills per image/page unit.
 - First `1,000` units per month: `Free`
-- Units `1,001` to `5,000,000`: `$1.50 / 1,000 units`
-- Units `5,000,001+`: `$0.60 / 1,000 units`
+- Units `1,001` to `5,000,000`: `INR 135 / 1,000 units` (about `INR 0.135` per page)
+- Units `5,000,001+`: `INR 54 / 1,000 units` (about `INR 0.054` per page)
 
 For files like PDF/TIFF, each page is a separate billable unit.
-
-For INR planning below, use a rounded planning rate:
-- `1 USD ~= INR 90` (planning approximation)
-
-Converted planning rates:
-- `$1.50 / 1,000` ~= `INR 135 / 1,000` (about `INR 0.135` per page)
-- `$0.60 / 1,000` ~= `INR 54 / 1,000` (about `INR 0.054` per page)
 
 ## 4) Practical Usage Mapping (Real-Life)
 
@@ -97,4 +90,3 @@ For dyslexia-first UX:
 - Vision quotas/limits: https://docs.cloud.google.com/vision/quotas
 - Batch file OCR (PDF/TIFF): https://cloud.google.com/vision/docs/file-batch
 - Detect text in files: https://cloud.google.com/vision/docs/pdf
-
