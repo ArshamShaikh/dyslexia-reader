@@ -1,10 +1,9 @@
 // HomeScreen.jsx
 import { MaterialIcons } from "@expo/vector-icons";
 import Constants from "expo-constants";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
-    Alert,
     Platform,
     StyleSheet,
     Text,
@@ -20,12 +19,20 @@ import * as FileSystem from "expo-file-system";
 import * as ImagePicker from "expo-image-picker";
 import DocumentScanner from "react-native-document-scanner-plugin";
 import { cleanOcrText } from "../utils/ocrCleaner";
+import ThemedDialog from "../components/ThemedDialog";
 
 export default function HomeScreen({ navigation }) {
   const [inputText, setInputText] = useState("");
   const [textInputHeight, setTextInputHeight] = useState(120);
   const [isUploading, setIsUploading] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
+  const [dialogConfig, setDialogConfig] = useState({
+    visible: false,
+    title: "",
+    message: "",
+    actions: [],
+  });
+  const dialogResolverRef = useRef(null);
   const { backgroundTheme } = useSettings();
   const theme = THEMES[backgroundTheme] || THEMES.light;
   const uiTextColor = theme.text;
@@ -47,6 +54,39 @@ export default function HomeScreen({ navigation }) {
     return "http://localhost:5050";
   }, []);
   const MAX_READER_CHARS = 20000;
+  const openDialog = ({ title, message, actions }) =>
+    new Promise((resolve) => {
+      dialogResolverRef.current = resolve;
+      setDialogConfig({
+        visible: true,
+        title,
+        message,
+        actions: actions || [],
+      });
+    });
+
+  const closeDialog = () => {
+    setDialogConfig((prev) => ({ ...prev, visible: false }));
+    const resolve = dialogResolverRef.current;
+    dialogResolverRef.current = null;
+    if (resolve) resolve(null);
+  };
+
+  const handleDialogAction = (action) => {
+    setDialogConfig((prev) => ({ ...prev, visible: false }));
+    const resolve = dialogResolverRef.current;
+    dialogResolverRef.current = null;
+    if (resolve) resolve(action?.value ?? null);
+    if (action?.onPress) action.onPress();
+  };
+
+  const showInfo = async (title, message) => {
+    await openDialog({
+      title,
+      message,
+      actions: [{ label: "OK", value: "ok", tone: "primary" }],
+    });
+  };
 
   const handleContentSizeChange = (event) => {
     const height = Math.min(event.nativeEvent.contentSize.height, 300);
@@ -94,7 +134,10 @@ export default function HomeScreen({ navigation }) {
         const text = await uploadAsset("pdf", file);
         const cleaned = cleanOcrText(text);
         if (!cleaned) {
-          Alert.alert("No text found", "This PDF looks scanned. OCR for scanned PDFs is coming next.");
+          await showInfo(
+            "No text found",
+            "This PDF looks scanned. OCR for scanned PDFs is coming next."
+          );
           return;
         }
         setInputText(cleaned);
@@ -107,7 +150,7 @@ export default function HomeScreen({ navigation }) {
         const text = await uploadAsset("docx", file);
         const cleaned = cleanOcrText(text);
         if (!cleaned) {
-          Alert.alert("No text found", "This document might be empty.");
+          await showInfo("No text found", "This document might be empty.");
           return;
         }
         setInputText(cleaned);
@@ -120,7 +163,7 @@ export default function HomeScreen({ navigation }) {
         const text = await uploadAsset("ocr", file);
         const cleaned = cleanOcrText(text);
         if (!cleaned) {
-          Alert.alert("No text detected", "Try a clearer image.");
+          await showInfo("No text detected", "Try a clearer image.");
           return;
         }
         setInputText(cleaned);
@@ -129,7 +172,7 @@ export default function HomeScreen({ navigation }) {
 
       const content = await FileSystem.readAsStringAsync(file.uri);
       if (!content) {
-        Alert.alert("File is empty", "Please choose a file with text.");
+        await showInfo("File is empty", "Please choose a file with text.");
         return;
       }
       setInputText(cleanOcrText(content));
@@ -140,12 +183,18 @@ export default function HomeScreen({ navigation }) {
         const text = await uploadAsset("pdf", file);
         const cleaned = cleanOcrText(text);
         if (!cleaned) {
-          Alert.alert("No text found", "This PDF looks scanned. OCR for scanned PDFs is coming next.");
+          await showInfo(
+            "No text found",
+            "This PDF looks scanned. OCR for scanned PDFs is coming next."
+          );
           return;
         }
         setInputText(cleaned);
       } catch (uploadError) {
-        Alert.alert("Couldn't open file", uploadError?.message || "Try a different file.");
+        await showInfo(
+          "Couldn't open file",
+          uploadError?.message || "Try a different file."
+        );
       }
     } finally {
       setIsUploading(false);
@@ -198,16 +247,14 @@ export default function HomeScreen({ navigation }) {
       if (result.canceled) return;
       asset = result.assets?.[0];
     } else {
-      const choice = await new Promise((resolve) => {
-        Alert.alert(
-          "Scan text",
-          "Choose an option",
-          [
-            { text: "Take photo", onPress: () => resolve("camera") },
-            { text: "Choose image", onPress: () => resolve("gallery") },
-            { text: "Cancel", style: "cancel", onPress: () => resolve(null) },
-          ]
-        );
+      const choice = await openDialog({
+        title: "Scan text",
+        message: "Pick how you want to add a page",
+        actions: [
+          { label: "Cancel", value: null, tone: "destructive", icon: "close" },
+          { label: "Take Photo", value: "camera", tone: "primary", icon: "photo-camera" },
+          { label: "Choose Image", value: "gallery", icon: "image" },
+        ],
       });
 
       if (!choice) return;
@@ -231,7 +278,7 @@ export default function HomeScreen({ navigation }) {
             return;
           }
         } catch (error) {
-          Alert.alert("Scanner failed", "Try again or choose an image instead.");
+          await showInfo("Scanner failed", "Try again or choose an image instead.");
           setStatusMessage("");
           return;
         }
@@ -257,12 +304,15 @@ export default function HomeScreen({ navigation }) {
       const text = await uploadAsset("ocr", normalizedAsset);
       const cleaned = cleanOcrText(text);
       if (!cleaned) {
-        Alert.alert("No text detected", "Try a clearer image.");
+        await showInfo("No text detected", "Try a clearer image.");
         return;
       }
       setInputText(cleaned);
     } catch (error) {
-      Alert.alert("OCR failed", error?.message || "Check the server and try again.");
+      await showInfo(
+        "OCR failed",
+        error?.message || "Check the server and try again."
+      );
     } finally {
       setIsUploading(false);
       setStatusMessage("");
@@ -334,23 +384,22 @@ export default function HomeScreen({ navigation }) {
               borderWidth: 1,
             },
           ]}
-          onPress={() => {
+          onPress={async () => {
             const rawText = inputText || "Sample reading text will appear here.";
             if (rawText.length > MAX_READER_CHARS) {
-              Alert.alert(
-                "Large document",
-                `This text is very long. To keep reading smooth, we will open the first ${MAX_READER_CHARS.toLocaleString()} characters.`,
-                [
-                  { text: "Cancel", style: "cancel" },
-                  {
-                    text: "Continue",
-                    onPress: () =>
-                      navigation.navigate("Reader", {
-                        text: rawText.slice(0, MAX_READER_CHARS),
-                      }),
-                  },
-                ]
-              );
+              const choice = await openDialog({
+                title: "Large document",
+                message: `This text is very long. To keep reading smooth, we will open the first ${MAX_READER_CHARS.toLocaleString()} characters.`,
+                actions: [
+                  { label: "Cancel", value: "cancel" },
+                  { label: "Continue", value: "continue", tone: "primary" },
+                ],
+              });
+              if (choice === "continue") {
+                navigation.navigate("Reader", {
+                  text: rawText.slice(0, MAX_READER_CHARS),
+                });
+              }
               return;
             }
             navigation.navigate("Reader", { text: rawText });
@@ -425,6 +474,15 @@ export default function HomeScreen({ navigation }) {
           </View>
         )}
       </View>
+      <ThemedDialog
+        visible={dialogConfig.visible}
+        title={dialogConfig.title}
+        message={dialogConfig.message}
+        actions={dialogConfig.actions}
+        theme={theme}
+        onAction={handleDialogAction}
+        onRequestClose={closeDialog}
+      />
 
     </SafeAreaView>
   );
