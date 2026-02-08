@@ -14,11 +14,17 @@ export default function ThemedDialog({
     actions.length > 0
       ? actions
       : [{ label: "OK", value: "ok", tone: "primary" }];
+  const compactActions = resolvedActions.filter((action) => action.compact);
+  const regularActions = resolvedActions.filter((action) => !action.compact);
 
   const panelBg = theme?.background === "#16171A" ? "#1C1D20" : "#FFFFFF";
   const textColor = theme?.text || "#1B1C1F";
   const borderColor = theme?.border || "#C8CBD1";
-  const isStacked = resolvedActions.length >= 3;
+  const isStacked = regularActions.length >= 3;
+  const isPickerLayout =
+    compactActions.length > 0 &&
+    regularActions.length === 2 &&
+    regularActions.every((action) => !!action.icon);
 
   return (
     <Modal
@@ -32,16 +38,73 @@ export default function ThemedDialog({
         <View
           style={[
             styles.panel,
+            isPickerLayout && styles.panelPicker,
             {
               backgroundColor: panelBg,
               borderColor,
             },
           ]}
         >
-          {!!title && <Text style={[styles.title, { color: textColor }]}>{title}</Text>}
-          {!!message && <Text style={[styles.message, { color: textColor }]}>{message}</Text>}
-          <View style={[styles.actionsRow, isStacked && styles.actionsCol]}>
-            {resolvedActions.map((action, idx) => {
+          {compactActions.length > 0 && (
+            <View style={styles.cornerActions}>
+              {compactActions.map((action, idx) => {
+                const tone = action.tone || "default";
+                const isDestructive = tone === "destructive";
+                const fg = isDestructive ? "#D26B6B" : textColor;
+                const actionBorderColor = isDestructive ? "#D26B6B" : borderColor;
+                return (
+                  <TouchableOpacity
+                    key={`compact-${action.label}-${idx}`}
+                    style={[
+                      styles.compactActionBtn,
+                      {
+                        borderColor: actionBorderColor,
+                        backgroundColor: "transparent",
+                      },
+                    ]}
+                    onPress={() => onAction?.(action)}
+                  >
+                    {!!action.icon && (
+                      <MaterialIcons name={action.icon} size={16} color={fg} />
+                    )}
+                    <Text style={[styles.compactActionText, { color: fg }]}>{action.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+          <View style={[styles.titleBlock, isPickerLayout && styles.titleBlockPicker]}>
+            {!!title && (
+              <Text
+                style={[
+                  styles.title,
+                  isPickerLayout && styles.titlePicker,
+                  { color: textColor },
+                ]}
+              >
+                {title}
+              </Text>
+            )}
+            {!!message && (
+              <Text
+                style={[
+                  styles.message,
+                  isPickerLayout && styles.messagePicker,
+                  { color: textColor },
+                ]}
+              >
+                {message}
+              </Text>
+            )}
+          </View>
+          <View
+            style={[
+              styles.actionsRow,
+              isStacked && styles.actionsCol,
+              isPickerLayout && styles.actionsRowPicker,
+            ]}
+          >
+            {regularActions.map((action, idx) => {
               const tone = action.tone || "default";
               const isPrimary = tone === "primary";
               const isDestructive = tone === "destructive";
@@ -58,6 +121,7 @@ export default function ThemedDialog({
                   key={`${action.label}-${idx}`}
                   style={[
                     styles.actionBtn,
+                    !!actionIcon && styles.actionBtnIconCard,
                     isStacked && styles.actionBtnStacked,
                     {
                       backgroundColor: bg,
@@ -67,8 +131,8 @@ export default function ThemedDialog({
                   onPress={() => onAction?.(action)}
                 >
                   {actionIcon ? (
-                    <View style={styles.actionContent}>
-                      <MaterialIcons name={actionIcon} size={18} color={fg} />
+                    <View style={styles.actionContentColumn}>
+                      <MaterialIcons name={actionIcon} size={24} color={fg} />
                       <Text style={[styles.actionText, { color: fg }]}>{action.label}</Text>
                     </View>
                   ) : (
@@ -98,6 +162,7 @@ const styles = StyleSheet.create({
   panel: {
     width: "100%",
     maxWidth: 360,
+    position: "relative",
     borderRadius: 14,
     borderWidth: 1.5,
     padding: 14,
@@ -108,17 +173,35 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
   },
+  panelPicker: {
+    paddingTop: 12,
+  },
+  titleBlock: {
+    gap: 4,
+  },
+  titleBlockPicker: {
+    alignItems: "center",
+    marginTop: 26,
+    marginBottom: 2,
+  },
   title: {
     fontSize: 18,
     fontWeight: "700",
+  },
+  titlePicker: {
+    textAlign: "center",
+    fontSize: 19,
   },
   message: {
     fontSize: 14,
     lineHeight: 20,
   },
+  messagePicker: {
+    textAlign: "center",
+  },
   actionsRow: {
     flexDirection: "row",
-    justifyContent: "flex-end",
+    justifyContent: "space-between",
     gap: 8,
     marginTop: 4,
     flexWrap: "wrap",
@@ -126,6 +209,9 @@ const styles = StyleSheet.create({
   actionsCol: {
     flexDirection: "column",
     alignItems: "stretch",
+  },
+  actionsRowPicker: {
+    marginTop: 0,
   },
   actionBtn: {
     minWidth: 88,
@@ -136,14 +222,40 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  actionBtnIconCard: {
+    flex: 1,
+    minHeight: 80,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+  },
   actionBtnStacked: {
     width: "100%",
   },
-  actionContent: {
-    flexDirection: "row",
+  actionContentColumn: {
+    flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    gap: 6,
+  },
+  cornerActions: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    zIndex: 2,
+  },
+  compactActionBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1.5,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    alignSelf: "flex-end",
+  },
+  compactActionText: {
+    fontSize: 12,
+    fontWeight: "700",
   },
   actionText: {
     fontSize: 13,

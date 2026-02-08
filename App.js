@@ -54,6 +54,27 @@ function MainTabs() {
   );
 }
 
+function AppShell() {
+  const { backgroundTheme } = useSettings();
+  const theme = THEMES[backgroundTheme] || THEMES.light;
+  const statusBarStyle = backgroundTheme === "dark" ? "light" : "dark";
+
+  return (
+    <>
+      <StatusBar style={statusBarStyle} backgroundColor={theme.background} translucent={false} />
+      <NavigationContainer>
+        <Stack.Navigator
+          initialRouteName="MainTabs"
+          screenOptions={{ headerShown: false }}
+        >
+          <Stack.Screen name="MainTabs" component={MainTabs} />
+          <Stack.Screen name="Reader" component={ReaderScreen} />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </>
+  );
+}
+
 export default function App() {
   const [fontsLoaded] = useFonts({
     "Lexend-Regular": require("./assets/lexend/static/Lexend-Regular.ttf"),
@@ -67,16 +88,7 @@ export default function App() {
 
   return (
     <SettingsProvider>
-      <StatusBar style="dark" />
-      <NavigationContainer>
-        <Stack.Navigator
-          initialRouteName="MainTabs"
-          screenOptions={{ headerShown: false }}
-        >
-          <Stack.Screen name="MainTabs" component={MainTabs} />
-          <Stack.Screen name="Reader" component={ReaderScreen} />
-        </Stack.Navigator>
-      </NavigationContainer>
+      <AppShell />
     </SettingsProvider>
   );
 }

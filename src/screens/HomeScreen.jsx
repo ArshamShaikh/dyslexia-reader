@@ -237,62 +237,8 @@ export default function HomeScreen({ navigation }) {
     return data?.text?.trim() || "";
   };
 
-  const handleOCR = async () => {
-    let asset;
-    if (Platform.OS === "web") {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ["image/*"],
-        copyToCacheDirectory: true,
-      });
-      if (result.canceled) return;
-      asset = result.assets?.[0];
-    } else {
-      const choice = await openDialog({
-        title: "Scan text",
-        message: "Pick how you want to add a page",
-        actions: [
-          { label: "Cancel", value: null, tone: "destructive", icon: "close" },
-          { label: "Take Photo", value: "camera", tone: "primary", icon: "photo-camera" },
-          { label: "Choose Image", value: "gallery", icon: "image" },
-        ],
-      });
-
-      if (!choice) return;
-
-      if (choice === "camera") {
-        try {
-          setStatusMessage("Opening scanner...");
-          const { scannedImages } = await DocumentScanner.scanDocument({
-            maxNumDocuments: 1,
-            responseType: "imageFilePath",
-          });
-          const scanPath = scannedImages?.[0];
-          if (scanPath) {
-            asset = {
-              uri: scanPath,
-              name: "scan.jpg",
-              mimeType: "image/jpeg",
-            };
-          } else {
-            setStatusMessage("");
-            return;
-          }
-        } catch (error) {
-          await showInfo("Scanner failed", "Try again or choose an image instead.");
-          setStatusMessage("");
-          return;
-        }
-      } else if (choice === "gallery") {
-        const result = await ImagePicker.launchImageLibraryAsync({
-          quality: 0.9,
-        });
-        if (result.canceled) return;
-        asset = result.assets?.[0];
-      }
-    }
-
+  const runImageOcr = async (asset) => {
     if (!asset) return;
-
     try {
       setIsUploading(true);
       setStatusMessage("Uploading for OCR...");
@@ -315,6 +261,53 @@ export default function HomeScreen({ navigation }) {
       );
     } finally {
       setIsUploading(false);
+      setStatusMessage("");
+    }
+  };
+
+  const handlePickPhoto = async () => {
+    let asset;
+    if (Platform.OS === "web") {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ["image/*"],
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled) return;
+      asset = result.assets?.[0];
+    } else {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        quality: 0.9,
+      });
+      if (result.canceled) return;
+      asset = result.assets?.[0];
+    }
+    await runImageOcr(asset);
+  };
+
+  const handleCameraScan = async () => {
+    if (Platform.OS === "web") {
+      await handlePickPhoto();
+      return;
+    }
+
+    try {
+      setStatusMessage("Opening scanner...");
+      const { scannedImages } = await DocumentScanner.scanDocument({
+        maxNumDocuments: 1,
+        responseType: "imageFilePath",
+      });
+      const scanPath = scannedImages?.[0];
+      if (!scanPath) {
+        setStatusMessage("");
+        return;
+      }
+      await runImageOcr({
+        uri: scanPath,
+        name: "scan.jpg",
+        mimeType: "image/jpeg",
+      });
+    } catch (_error) {
+      await showInfo("Scanner failed", "Try again or choose Photos instead.");
       setStatusMessage("");
     }
   };
@@ -446,12 +439,28 @@ export default function HomeScreen({ navigation }) {
                 theme.background === "#121212" ? "#1C1C1C" : theme.highlight,
             },
           ]}
-          onPress={handleOCR}
+          onPress={handlePickPhoto}
           disabled={isUploading}
-          accessibilityLabel="Scan text"
+          accessibilityLabel="Choose photos"
         >
-          <MaterialIcons name="document-scanner" size={22} color={uiTextColor} />
-          <Text style={[styles.actionLabel, { color: uiTextColor }]}>Scan</Text>
+          <MaterialIcons name="photo-library" size={22} color={uiTextColor} />
+          <Text style={[styles.actionLabel, { color: uiTextColor }]}>Photos</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.actionButton,
+            {
+              borderColor: theme.border,
+              backgroundColor:
+                theme.background === "#121212" ? "#1C1C1C" : theme.highlight,
+            },
+          ]}
+          onPress={handleCameraScan}
+          disabled={isUploading}
+          accessibilityLabel="Scan with camera"
+        >
+          <MaterialIcons name="photo-camera" size={22} color={uiTextColor} />
+          <Text style={[styles.actionLabel, { color: uiTextColor }]}>Camera</Text>
         </TouchableOpacity>
       </View>
 
@@ -627,20 +636,21 @@ const styles = StyleSheet.create({
   inputActions: {
     flexDirection: "row",
     justifyContent: "space-between",
-    gap: 10,
+    gap: 8,
     marginTop: 6,
-    padding: 10,
-    borderWidth: 1.5,
+    padding: 8,
+    borderWidth: 1.2,
     borderRadius: 16,
   },
   actionButton: {
     flex: 1,
+    minWidth: 0,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    gap: 4,
+    paddingVertical: 8,
+    borderRadius: 9,
+    borderWidth: 1.2,
+    gap: 3,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.12,
@@ -648,7 +658,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   actionLabel: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "600",
   },
   cardSurface: {
