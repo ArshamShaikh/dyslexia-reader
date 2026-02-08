@@ -34,6 +34,7 @@ export default function SettingsScreen() {
     setFontFamily,
   } = useSettings();
   const theme = THEMES[backgroundTheme] || THEMES.light;
+  const isDark = backgroundTheme === "dark";
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const roundToStep = (value, step) => Math.round(value / step) * step;
@@ -41,14 +42,13 @@ export default function SettingsScreen() {
     const next = roundToStep(value + direction * step, step);
     return clamp(Number(next.toFixed(2)), min, max);
   };
-  const stepperButtonStyle = (backgroundTheme) => ({
+  const stepperButtonStyle = () => ({
     borderColor: theme.border,
-    backgroundColor: backgroundTheme === "#121212" ? "#1C1C1C" : "#FFFFFF",
+    backgroundColor: isDark ? "#1C1C1C" : "#FFFFFF",
   });
-  const stepperTextStyle = (backgroundTheme) => ({
-    color: backgroundTheme === "#121212" ? "#F2F2F2" : "#1F1F1F",
+  const stepperTextStyle = () => ({
+    color: isDark ? "#F2F2F2" : "#1F1F1F",
   });
-  const isDarkBackground = theme.background === "#121212";
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
@@ -60,7 +60,7 @@ export default function SettingsScreen() {
           style={[
             styles.settingBlock,
             {
-              backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+              backgroundColor: isDark ? "#1C1C1C" : "#FFFFFF",
               borderColor: theme.border,
             },
           ]}
@@ -101,7 +101,7 @@ export default function SettingsScreen() {
         style={[
           styles.settingBlock,
           {
-            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            backgroundColor: isDark ? "#1C1C1C" : "#FFFFFF",
             borderColor: theme.border,
           },
         ]}
@@ -125,24 +125,24 @@ export default function SettingsScreen() {
           />
           <View style={styles.stepperInline}>
             <TouchableOpacity
-              style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
+              style={[styles.stepperButton, stepperButtonStyle()]}
               onPress={() =>
                 setHighlightStrength((prev) => stepAdjust(prev, 0.1, 0.2, 1.0, -1))
               }
               accessibilityLabel="Decrease highlight strength"
             >
-              <Text style={[styles.stepperText, stepperTextStyle(theme.background)]}>
+              <Text style={[styles.stepperText, stepperTextStyle()]}>
                 -
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
+              style={[styles.stepperButton, stepperButtonStyle()]}
               onPress={() =>
                 setHighlightStrength((prev) => stepAdjust(prev, 0.1, 0.2, 1.0, 1))
               }
               accessibilityLabel="Increase highlight strength"
             >
-              <Text style={[styles.stepperText, stepperTextStyle(theme.background)]}>
+              <Text style={[styles.stepperText, stepperTextStyle()]}>
                 +
               </Text>
             </TouchableOpacity>
@@ -155,7 +155,7 @@ export default function SettingsScreen() {
         style={[
           styles.settingBlock,
           {
-            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            backgroundColor: isDark ? "#1C1C1C" : "#FFFFFF",
             borderColor: theme.border,
           },
         ]}
@@ -179,22 +179,22 @@ export default function SettingsScreen() {
           />
           <View style={styles.stepperInline}>
             <TouchableOpacity
-              style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
+              style={[styles.stepperButton, stepperButtonStyle()]}
               onPress={() =>
                 setFontSize((prev) => stepAdjust(prev, 1, 14, 26, -1))
               }
               accessibilityLabel="Decrease font size"
             >
-              <Text style={[styles.stepperText, stepperTextStyle(theme.background)]}>-</Text>
+              <Text style={[styles.stepperText, stepperTextStyle()]}>-</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
+              style={[styles.stepperButton, stepperButtonStyle()]}
               onPress={() =>
                 setFontSize((prev) => stepAdjust(prev, 1, 14, 26, 1))
               }
               accessibilityLabel="Increase font size"
             >
-              <Text style={[styles.stepperText, stepperTextStyle(theme.background)]}>+</Text>
+              <Text style={[styles.stepperText, stepperTextStyle()]}>+</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -205,7 +205,7 @@ export default function SettingsScreen() {
         style={[
           styles.settingBlock,
           {
-            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            backgroundColor: isDark ? "#1C1C1C" : "#FFFFFF",
             borderColor: theme.border,
           },
         ]}
@@ -246,7 +246,7 @@ export default function SettingsScreen() {
         style={[
           styles.settingBlock,
           {
-            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            backgroundColor: isDark ? "#1C1C1C" : "#FFFFFF",
             borderColor: theme.border,
           },
         ]}
@@ -272,22 +272,22 @@ export default function SettingsScreen() {
           />
           <View style={styles.stepperInline}>
             <TouchableOpacity
-              style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
+              style={[styles.stepperButton, stepperButtonStyle()]}
               onPress={() =>
                 setLineHeight((prev) => stepAdjust(prev, 0.05, 1.1, 2.6, -1))
               }
               accessibilityLabel="Decrease line spacing"
             >
-              <Text style={[styles.stepperText, stepperTextStyle(theme.background)]}>-</Text>
+              <Text style={[styles.stepperText, stepperTextStyle()]}>-</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
+              style={[styles.stepperButton, stepperButtonStyle()]}
               onPress={() =>
                 setLineHeight((prev) => stepAdjust(prev, 0.05, 1.1, 2.6, 1))
               }
               accessibilityLabel="Increase line spacing"
             >
-              <Text style={[styles.stepperText, stepperTextStyle(theme.background)]}>+</Text>
+              <Text style={[styles.stepperText, stepperTextStyle()]}>+</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -298,7 +298,7 @@ export default function SettingsScreen() {
         style={[
           styles.settingBlock,
           {
-            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            backgroundColor: isDark ? "#1C1C1C" : "#FFFFFF",
             borderColor: theme.border,
           },
         ]}
@@ -322,22 +322,22 @@ export default function SettingsScreen() {
           />
           <View style={styles.stepperInline}>
             <TouchableOpacity
-              style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
+              style={[styles.stepperButton, stepperButtonStyle()]}
               onPress={() =>
                 setWordSpacing((prev) => stepAdjust(prev, 1, 0, 12, -1))
               }
               accessibilityLabel="Decrease word spacing"
             >
-              <Text style={[styles.stepperText, stepperTextStyle(theme.background)]}>-</Text>
+              <Text style={[styles.stepperText, stepperTextStyle()]}>-</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
+              style={[styles.stepperButton, stepperButtonStyle()]}
               onPress={() =>
                 setWordSpacing((prev) => stepAdjust(prev, 1, 0, 12, 1))
               }
               accessibilityLabel="Increase word spacing"
             >
-              <Text style={[styles.stepperText, stepperTextStyle(theme.background)]}>+</Text>
+              <Text style={[styles.stepperText, stepperTextStyle()]}>+</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -348,7 +348,7 @@ export default function SettingsScreen() {
         style={[
           styles.settingBlock,
           {
-            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            backgroundColor: isDark ? "#1C1C1C" : "#FFFFFF",
             borderColor: theme.border,
           },
         ]}
@@ -374,22 +374,22 @@ export default function SettingsScreen() {
           />
           <View style={styles.stepperInline}>
             <TouchableOpacity
-              style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
+              style={[styles.stepperButton, stepperButtonStyle()]}
               onPress={() =>
                 setLetterSpacing((prev) => stepAdjust(prev, 0.05, 0, 1.2, -1))
               }
               accessibilityLabel="Decrease letter spacing"
             >
-              <Text style={[styles.stepperText, stepperTextStyle(theme.background)]}>-</Text>
+              <Text style={[styles.stepperText, stepperTextStyle()]}>-</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
+              style={[styles.stepperButton, stepperButtonStyle()]}
               onPress={() =>
                 setLetterSpacing((prev) => stepAdjust(prev, 0.05, 0, 1.2, 1))
               }
               accessibilityLabel="Increase letter spacing"
             >
-              <Text style={[styles.stepperText, stepperTextStyle(theme.background)]}>+</Text>
+              <Text style={[styles.stepperText, stepperTextStyle()]}>+</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -400,7 +400,7 @@ export default function SettingsScreen() {
         style={[
           styles.settingBlock,
           {
-            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            backgroundColor: isDark ? "#1C1C1C" : "#FFFFFF",
             borderColor: theme.border,
           },
         ]}
@@ -424,22 +424,22 @@ export default function SettingsScreen() {
           />
           <View style={styles.stepperInline}>
             <TouchableOpacity
-              style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
+              style={[styles.stepperButton, stepperButtonStyle()]}
               onPress={() =>
                 setTextBoxPadding((prev) => stepAdjust(prev, 1, 6, 36, -1))
               }
               accessibilityLabel="Decrease text box padding"
             >
-              <Text style={[styles.stepperText, stepperTextStyle(theme.background)]}>-</Text>
+              <Text style={[styles.stepperText, stepperTextStyle()]}>-</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
+              style={[styles.stepperButton, stepperButtonStyle()]}
               onPress={() =>
                 setTextBoxPadding((prev) => stepAdjust(prev, 1, 6, 36, 1))
               }
               accessibilityLabel="Increase text box padding"
             >
-              <Text style={[styles.stepperText, stepperTextStyle(theme.background)]}>+</Text>
+              <Text style={[styles.stepperText, stepperTextStyle()]}>+</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -450,7 +450,7 @@ export default function SettingsScreen() {
         style={[
           styles.settingBlock,
           {
-            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+            backgroundColor: isDark ? "#1C1C1C" : "#FFFFFF",
             borderColor: theme.border,
           },
         ]}
@@ -476,22 +476,22 @@ export default function SettingsScreen() {
           />
           <View style={styles.stepperInline}>
             <TouchableOpacity
-              style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
+              style={[styles.stepperButton, stepperButtonStyle()]}
               onPress={() =>
                 setReadingSpeed((prev) => stepAdjust(prev, 0.05, 0.3, 2.0, -1))
               }
               accessibilityLabel="Decrease reading speed"
             >
-              <Text style={[styles.stepperText, stepperTextStyle(theme.background)]}>-</Text>
+              <Text style={[styles.stepperText, stepperTextStyle()]}>-</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.stepperButton, stepperButtonStyle(theme.background)]}
+              style={[styles.stepperButton, stepperButtonStyle()]}
               onPress={() =>
                 setReadingSpeed((prev) => stepAdjust(prev, 0.05, 0.3, 2.0, 1))
               }
               accessibilityLabel="Increase reading speed"
             >
-              <Text style={[styles.stepperText, stepperTextStyle(theme.background)]}>+</Text>
+              <Text style={[styles.stepperText, stepperTextStyle()]}>+</Text>
             </TouchableOpacity>
           </View>
         </View>

@@ -6,12 +6,15 @@ import { useFocusEffect } from "@react-navigation/native";
 import { deleteSavedText, getSavedTexts } from "../services/storageService";
 import { useSettings } from "../context/SettingsContext";
 import { THEMES } from "../theme/colors";
+import ThemedDialog from "../components/ThemedDialog";
 
 export default function SavedScreen({ navigation }) {
   const [savedTexts, setSavedTexts] = useState([]);
+  const [pendingDeleteId, setPendingDeleteId] = useState(null);
   const { backgroundTheme } = useSettings();
   const theme = THEMES[backgroundTheme] || THEMES.light;
   const uiTextColor = theme.text;
+  const isDark = backgroundTheme === "dark";
 
   const loadSavedTexts = useCallback(() => {
     getSavedTexts().then(setSavedTexts);
@@ -47,8 +50,7 @@ export default function SavedScreen({ navigation }) {
               style={[
                 styles.card,
                 {
-                  backgroundColor:
-                    theme.background === "#121212" ? "#1C1C1C" : "#FFFFFF",
+                  backgroundColor: isDark ? "#1C1C1C" : "#FFFFFF",
                   borderColor: theme.border,
                 },
               ]}
@@ -65,7 +67,7 @@ export default function SavedScreen({ navigation }) {
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.deleteButton}
-                onPress={() => handleDelete(item.id)}
+                onPress={() => setPendingDeleteId(item.id)}
                 accessibilityLabel="Delete saved text"
               >
                 <Text style={styles.deleteText}>Delete</Text>
@@ -74,6 +76,24 @@ export default function SavedScreen({ navigation }) {
           )}
         />
       )}
+      <ThemedDialog
+        visible={!!pendingDeleteId}
+        title="Delete saved text?"
+        message="This action cannot be undone."
+        actions={[
+          { label: "Cancel", value: "cancel" },
+          { label: "Delete", value: "delete", tone: "destructive" },
+        ]}
+        theme={theme}
+        onAction={async (action) => {
+          const targetId = pendingDeleteId;
+          setPendingDeleteId(null);
+          if (action?.value === "delete" && targetId) {
+            await handleDelete(targetId);
+          }
+        }}
+        onRequestClose={() => setPendingDeleteId(null)}
+      />
 
     </SafeAreaView>
   );
