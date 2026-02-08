@@ -7,6 +7,7 @@ import { deleteSavedText, getSavedTexts } from "../services/storageService";
 import { useSettings } from "../context/SettingsContext";
 import { THEMES } from "../theme/colors";
 import ThemedDialog from "../components/ThemedDialog";
+import { createReaderSession } from "../services/readerSessionService";
 
 export default function SavedScreen({ navigation }) {
   const [savedTexts, setSavedTexts] = useState([]);
@@ -56,7 +57,13 @@ export default function SavedScreen({ navigation }) {
               ]}
             >
               <TouchableOpacity
-                onPress={() => navigation.navigate("Reader", { text: item.text })}
+                onPress={() => {
+                  const sessionId = createReaderSession(item.text);
+                  navigation.navigate("Reader", {
+                    sessionId,
+                    text: item.text.slice(0, 20000),
+                  });
+                }}
               >
                 <Text style={[styles.cardTitle, { color: uiTextColor }]}>
                   {item.title}

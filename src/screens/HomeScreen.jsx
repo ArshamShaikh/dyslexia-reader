@@ -20,6 +20,7 @@ import * as ImagePicker from "expo-image-picker";
 import DocumentScanner from "react-native-document-scanner-plugin";
 import { cleanOcrText } from "../utils/ocrCleaner";
 import ThemedDialog from "../components/ThemedDialog";
+import { createReaderSession } from "../services/readerSessionService";
 
 export default function HomeScreen({ navigation }) {
   const [inputText, setInputText] = useState("");
@@ -53,7 +54,7 @@ export default function HomeScreen({ navigation }) {
     if (Platform.OS === "android") return "http://10.0.2.2:5050";
     return "http://localhost:5050";
   }, []);
-  const MAX_READER_CHARS = 20000;
+  const MAX_OPEN_CHARS = 500000;
   const openDialog = ({ title, message, actions }) =>
     new Promise((resolve) => {
       dialogResolverRef.current = resolve;
@@ -92,6 +93,38 @@ export default function HomeScreen({ navigation }) {
     const height = Math.min(event.nativeEvent.contentSize.height, 300);
     setTextInputHeight(Math.max(120, height));
   };
+
+  const readTextFileSafely = async (asset) => {
+    const candidateUris = [];
+    if (asset?.uri) candidateUris.push(asset.uri);
+    if (asset?.uri && !asset.uri.startsWith("file://")) {
+      candidateUris.push(`file://${asset.uri}`);
+    }
+
+    for (const uri of candidateUris) {
+      try {
+        const content = await FileSystem.readAsStringAsync(uri);
+        if (typeof content === "string") return content;
+      } catch (_error) {
+        // Try next URI strategy.
+      }
+    }
+
+    if (asset?.uri) {
+      try {
+        const response = await fetch(asset.uri);
+        if (response.ok) {
+          const content = await response.text();
+          if (typeof content === "string") return content;
+        }
+      } catch (_error) {
+        // Fall through to final error.
+      }
+    }
+
+    throw new Error("Couldn't read this text file. Try a different file.");
+  };
+
   const handlePickFile = async () => {
     const result = await DocumentPicker.getDocumentAsync({
       type: [
@@ -125,6 +158,11 @@ export default function HomeScreen({ navigation }) {
       const isImage =
         file.mimeType?.startsWith("image/") ||
         [".jpg", ".jpeg", ".png", ".webp", ".heic"].some((ext) =>
+          nameLower.endsWith(ext) || uriLower.endsWith(ext)
+        );
+      const isTextLike =
+        file.mimeType?.startsWith("text/") ||
+        [".txt", ".md", ".csv", ".json", ".log"].some((ext) =>
           nameLower.endsWith(ext) || uriLower.endsWith(ext)
         );
 
@@ -170,32 +208,22 @@ export default function HomeScreen({ navigation }) {
         return;
       }
 
-      const content = await FileSystem.readAsStringAsync(file.uri);
-      if (!content) {
-        await showInfo("File is empty", "Please choose a file with text.");
-        return;
-      }
-      setInputText(cleanOcrText(content));
-    } catch (error) {
-      try {
-        setIsUploading(true);
-        setStatusMessage("Uploading file...");
-        const text = await uploadAsset("pdf", file);
-        const cleaned = cleanOcrText(text);
-        if (!cleaned) {
-          await showInfo(
-            "No text found",
-            "This PDF looks scanned. OCR for scanned PDFs is coming next."
-          );
+      if (isTextLike) {
+        const content = await readTextFileSafely(file);
+        if (!content) {
+          await showInfo("File is empty", "Please choose a file with text.");
           return;
         }
-        setInputText(cleaned);
-      } catch (uploadError) {
-        await showInfo(
-          "Couldn't open file",
-          uploadError?.message || "Try a different file."
-        );
+        setInputText(cleanOcrText(content));
+        return;
       }
+
+      await showInfo(
+        "Unsupported file",
+        "Please choose a PDF, DOCX, image, or text file."
+      );
+    } catch (error) {
+      await showInfo("Couldn't open file", error?.message || "Try a different file.");
     } finally {
       setIsUploading(false);
       setStatusMessage("");
@@ -218,7 +246,11 @@ export default function HomeScreen({ navigation }) {
     }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    const sizeBytes = Number(asset?.size || asset?.fileSize || 0);
+    const estimatedTimeoutMs = sizeBytes
+      ? Math.min(180000, Math.max(30000, 20000 + Math.ceil(sizeBytes / (1024 * 1024)) * 8000))
+      : 90000;
+    const timeoutId = setTimeout(() => controller.abort(), estimatedTimeoutMs);
     const response = await fetch(`${apiBaseUrl}/${endpoint}`, {
       method: "POST",
       body: formData,
@@ -379,23 +411,24 @@ export default function HomeScreen({ navigation }) {
           ]}
           onPress={async () => {
             const rawText = inputText || "Sample reading text will appear here.";
-            if (rawText.length > MAX_READER_CHARS) {
+            let openText = rawText;
+            if (rawText.length > MAX_OPEN_CHARS) {
               const choice = await openDialog({
                 title: "Large document",
-                message: `This text is very long. To keep reading smooth, we will open the first ${MAX_READER_CHARS.toLocaleString()} characters.`,
+                message: `This document is extremely large. To keep the app stable, we will open the first ${MAX_OPEN_CHARS.toLocaleString()} characters in chunked reading mode.`,
                 actions: [
                   { label: "Cancel", value: "cancel" },
                   { label: "Continue", value: "continue", tone: "primary" },
                 ],
               });
-              if (choice === "continue") {
-                navigation.navigate("Reader", {
-                  text: rawText.slice(0, MAX_READER_CHARS),
-                });
-              }
-              return;
+              if (choice !== "continue") return;
+              openText = rawText.slice(0, MAX_OPEN_CHARS);
             }
-            navigation.navigate("Reader", { text: rawText });
+            const sessionId = createReaderSession(openText);
+            navigation.navigate("Reader", {
+              sessionId,
+              text: openText.slice(0, 20000),
+            });
           }}
           accessible={true}
           accessibilityLabel="Start reading"

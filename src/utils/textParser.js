@@ -117,3 +117,46 @@ export const splitIntoLines = (text, maxCharsPerLine = 36) => {
 
   return lines;
 };
+
+export const splitIntoSegments = (text, maxChars = 14000) => {
+  const normalized = (text || "").replace(/\r\n/g, "\n").trim();
+  if (!normalized) return [""];
+  if (normalized.length <= maxChars) return [normalized];
+
+  const segments = [];
+  const minBreakThreshold = Math.floor(maxChars * 0.55);
+  let start = 0;
+
+  while (start < normalized.length) {
+    let end = Math.min(start + maxChars, normalized.length);
+
+    if (end < normalized.length) {
+      let breakAt = normalized.lastIndexOf("\n\n", end);
+      if (breakAt <= start + minBreakThreshold) {
+        breakAt = normalized.lastIndexOf("\n", end);
+      }
+      if (breakAt <= start + minBreakThreshold) {
+        breakAt = normalized.lastIndexOf(" ", end);
+      }
+      if (breakAt <= start + minBreakThreshold) {
+        breakAt = end;
+      }
+      end = breakAt;
+    }
+
+    const part = normalized.slice(start, end).trim();
+    if (part) segments.push(part);
+
+    if (end <= start) {
+      start += maxChars;
+    } else {
+      start = end;
+    }
+
+    while (start < normalized.length && /\s/.test(normalized[start])) {
+      start += 1;
+    }
+  }
+
+  return segments.length ? segments : [normalized];
+};

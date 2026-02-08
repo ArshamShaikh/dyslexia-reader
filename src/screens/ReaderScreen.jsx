@@ -25,16 +25,29 @@ import {
   stopSpeech,
   ttsEventEmitter,
 } from "../services/ttsService";
-import { splitIntoLines } from "../utils/textParser";
+import { splitIntoLines, splitIntoSegments } from "../utils/textParser";
 import { THEMES } from "../theme/colors";
 import { FONT_FAMILY_MAP } from "../theme/typography";
 import { addSavedText, isTextSaved } from "../services/storageService";
+import { getReaderSessionText } from "../services/readerSessionService";
 
 
 export default function ReaderScreen({ route, navigation }) {
-  const { text = SAMPLE_TEXT } = route.params || {};
-  const MAX_RENDER_CHARS = 20000;
-  const safeText = text.length > MAX_RENDER_CHARS ? text.slice(0, MAX_RENDER_CHARS) : text;
+  const { text = "", sessionId = "" } = route.params || {};
+  const MAX_TOTAL_CHARS = 500000;
+  const SEGMENT_CHARS = 14000;
+  const sessionText = getReaderSessionText(sessionId);
+  const sourceText = sessionText || text || SAMPLE_TEXT;
+  const fullText =
+    sourceText.length > MAX_TOTAL_CHARS
+      ? sourceText.slice(0, MAX_TOTAL_CHARS)
+      : sourceText;
+  const segments = useMemo(
+    () => splitIntoSegments(fullText, SEGMENT_CHARS),
+    [fullText]
+  );
+  const [currentSegmentIndex, setCurrentSegmentIndex] = useState(0);
+  const safeText = segments[currentSegmentIndex] || "";
   const [currentLineIndex, setCurrentLineIndex] = useState(-1);
   const [currentWordIndex, setCurrentWordIndex] = useState(-1);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -69,6 +82,9 @@ export default function ReaderScreen({ route, navigation }) {
   const lineHeightsRef = useRef([]);
   const speechMapRef = useRef([]);
   const speechMapIndexRef = useRef(0);
+  const currentSegmentIndexRef = useRef(0);
+  const segmentCountRef = useRef(segments.length);
+  const resumeOnNextSegmentRef = useRef(false);
   const lastHighlightTsRef = useRef(0);
   const currentLineIndexRef = useRef(-1);
   const pendingHighlightRef = useRef(null);
@@ -525,6 +541,23 @@ export default function ReaderScreen({ route, navigation }) {
   }, [currentLineIndex]);
 
   useEffect(() => {
+    currentSegmentIndexRef.current = currentSegmentIndex;
+  }, [currentSegmentIndex]);
+
+  useEffect(() => {
+    segmentCountRef.current = segments.length;
+    setCurrentSegmentIndex((prev) => {
+      if (prev < segments.length) return prev;
+      return Math.max(0, segments.length - 1);
+    });
+  }, [segments.length]);
+
+  useEffect(() => {
+    resumeOnNextSegmentRef.current = false;
+    setCurrentSegmentIndex(0);
+  }, [fullText]);
+
+  useEffect(() => {
     if (!useNativeTts) return;
     let isActive = true;
     getNativeVoices().then((voices) => {
@@ -545,17 +578,19 @@ export default function ReaderScreen({ route, navigation }) {
     lineOffsetsRef.current = [];
     wordOffsetsRef.current = [];
     lineHeightsRef.current = [];
+    scrollYRef.current = 0;
+    scrollContentHeightRef.current = 0;
     setCurrentLineIndex(-1);
     setCurrentWordIndex(-1);
     let isActive = true;
     setIsSaved(false);
-    isTextSaved(safeText).then((saved) => {
+    isTextSaved(fullText).then((saved) => {
       if (isActive) setIsSaved(saved);
     });
     return () => {
       isActive = false;
     };
-  }, [safeText]);
+  }, [safeText, fullText]);
 
   const getLineRole = (line) => {
     const value = (line || "").trim();
@@ -713,6 +748,52 @@ export default function ReaderScreen({ route, navigation }) {
     }
   }, [isFullScreen]);
 
+  const jumpToSegment = (segmentIndex, resumePlayback = false) => {
+    const maxIndex = Math.max(0, segmentCountRef.current - 1);
+    const clamped = Math.max(0, Math.min(maxIndex, segmentIndex));
+    if (clamped === currentSegmentIndexRef.current && !resumePlayback) return false;
+    if (resumePlayback) {
+      resumeOnNextSegmentRef.current = true;
+    }
+    setCurrentSegmentIndex(clamped);
+    return true;
+  };
+
+  const moveToNextSegment = (resumePlayback = false) => {
+    const next = currentSegmentIndexRef.current + 1;
+    if (next >= segmentCountRef.current) return false;
+    return jumpToSegment(next, resumePlayback);
+  };
+
+  const moveToPrevSegment = () => {
+    const prev = currentSegmentIndexRef.current - 1;
+    if (prev < 0) return false;
+    return jumpToSegment(prev, false);
+  };
+
+  useEffect(() => {
+    if (!resumeOnNextSegmentRef.current) return;
+    resumeOnNextSegmentRef.current = false;
+    const timer = setTimeout(() => {
+      if (!lineWords.length) {
+        setIsPlaying(false);
+        setIsPaused(false);
+        return;
+      }
+      setIsPlaying(true);
+      setIsPaused(false);
+      const speechPayload = buildSpeechMap(0, 0);
+      speechMapRef.current = speechPayload.map;
+      speechMapIndexRef.current = 0;
+      speakText(speechPayload.text, readingSpeed, useNativeTts, pitch);
+      if (!useNativeTts) {
+        startHighlighting(0, 0);
+      }
+      recenterToCurrentHighlight(false);
+    }, 90);
+    return () => clearTimeout(timer);
+  }, [safeText, lineWords.length, readingSpeed, useNativeTts, pitch]);
+
   const handlePlayPause = () => {
     if (isPlaying) {
       handlePause();
@@ -817,6 +898,16 @@ export default function ReaderScreen({ route, navigation }) {
 
   const handleBackward = () => {
     if (!lines.length) return;
+    if (currentLineIndex <= 0 && moveToPrevSegment()) {
+      setCurrentLineIndex(-1);
+      setCurrentWordIndex(-1);
+      if (isPlaying) {
+        stopSpeech();
+        stopHighlighting();
+        resumeOnNextSegmentRef.current = true;
+      }
+      return;
+    }
     const newIndex = Math.max(0, currentLineIndex - 1);
     setCurrentLineIndex(newIndex);
     setCurrentWordIndex(-1);
@@ -834,6 +925,11 @@ export default function ReaderScreen({ route, navigation }) {
 
   const handleForward = () => {
     if (!lines.length) return;
+    if (currentLineIndex >= lines.length - 1 && moveToNextSegment(isPlaying)) {
+      setCurrentLineIndex(-1);
+      setCurrentWordIndex(-1);
+      return;
+    }
     const newIndex = Math.min(lines.length - 1, currentLineIndex + 1);
     setCurrentLineIndex(newIndex);
     setCurrentWordIndex(-1);
@@ -881,6 +977,10 @@ export default function ReaderScreen({ route, navigation }) {
 
     const advanceWord = (lineIndex, wordIndex) => {
       if (lineIndex >= lineWords.length) {
+        stopSpeech();
+        if (moveToNextSegment(true)) {
+          return;
+        }
         setIsPlaying(false);
         setIsPaused(false);
         setCurrentLineIndex(-1);
@@ -967,6 +1067,9 @@ export default function ReaderScreen({ route, navigation }) {
         pendingHighlightTimerRef.current = null;
       }
       pendingHighlightRef.current = null;
+      if (moveToNextSegment(true)) {
+        return;
+      }
       setIsPlaying(false);
       setIsPaused(false);
       setCurrentLineIndex(-1);
@@ -994,14 +1097,14 @@ export default function ReaderScreen({ route, navigation }) {
   }, [useNativeTts, readingSpeed]);
 
   const handleSave = async () => {
-    if (!safeText || !safeText.trim()) return;
+    if (!fullText || !fullText.trim()) return;
     if (isSaved) {
       setSaveNotice("Already saved");
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
       toastTimerRef.current = setTimeout(() => setSaveNotice(""), 1400);
       return;
     }
-    await addSavedText(safeText);
+    await addSavedText(fullText);
     setIsSaved(true);
     setSaveNotice("Saved");
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -1084,6 +1187,60 @@ export default function ReaderScreen({ route, navigation }) {
           <Text style={[styles.toastText, { color: theme.background }]}>
             {saveNotice}
           </Text>
+        </View>
+      )}
+      {segments.length > 1 && (
+        <View
+          style={[
+            styles.segmentBar,
+            {
+              borderColor: theme.border,
+              backgroundColor:
+                theme.background === "#121212" ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.03)",
+            },
+          ]}
+        >
+          <TouchableOpacity
+            style={[styles.segmentArrow, { borderColor: theme.border }]}
+            onPress={() => {
+              const moved = moveToPrevSegment();
+              if (moved) {
+                stopSpeech();
+                stopHighlighting();
+                setIsPlaying(false);
+                setIsPaused(false);
+              }
+            }}
+            disabled={currentSegmentIndex <= 0}
+          >
+            <MaterialIcons
+              name="chevron-left"
+              size={16}
+              color={currentSegmentIndex <= 0 ? theme.border : uiTextColor}
+            />
+          </TouchableOpacity>
+          <Text style={[styles.segmentText, { color: uiTextColor }]}>
+            Part {currentSegmentIndex + 1} of {segments.length}
+          </Text>
+          <TouchableOpacity
+            style={[styles.segmentArrow, { borderColor: theme.border }]}
+            onPress={() => {
+              const moved = moveToNextSegment(false);
+              if (moved) {
+                stopSpeech();
+                stopHighlighting();
+                setIsPlaying(false);
+                setIsPaused(false);
+              }
+            }}
+            disabled={currentSegmentIndex >= segments.length - 1}
+          >
+            <MaterialIcons
+              name="chevron-right"
+              size={16}
+              color={currentSegmentIndex >= segments.length - 1 ? theme.border : uiTextColor}
+            />
+          </TouchableOpacity>
         </View>
       )}
 
@@ -1226,7 +1383,6 @@ export default function ReaderScreen({ route, navigation }) {
                       fontFamily: resolvedFontFamily,
                       fontSize: lineFontSize,
                       lineHeight: lineHeightPx,
-                      color: readerTextColor,
                       fontWeight: lineFontWeight,
                       letterSpacing: effectiveLetterSpacing,
                       marginRight: wordIndex === words.length - 1 ? 0 : effectiveWordGap,
@@ -2145,6 +2301,31 @@ const styles = StyleSheet.create({
     zIndex: 3,
   },
   toastText: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  segmentBar: {
+    marginTop: 6,
+    marginHorizontal: 12,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  segmentArrow: {
+    width: 28,
+    height: 28,
+    borderWidth: 1,
+    borderRadius: 7,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  segmentText: {
     fontSize: 12,
     fontWeight: "700",
   },
