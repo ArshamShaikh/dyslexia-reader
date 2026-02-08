@@ -15,6 +15,14 @@ export const cleanOcrText = (raw) => {
   const isBullet = (line) =>
     /^(\-|\*|\u2022|[0-9]+[\.\)]|[A-Za-z][\.\)])\s+/.test(line.trim());
 
+  const shouldJoinAsContinuation = (line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    if (looksLikeHeading(trimmed)) return false;
+    if (isBullet(trimmed)) return false;
+    return true;
+  };
+
   const normalizeLine = (line) =>
     line
       .replace(/\s+/g, " ")
@@ -53,18 +61,34 @@ export const cleanOcrText = (raw) => {
 
     const heading = looksLikeHeading(line);
     const bullet = isBullet(line);
-    const endsSentence = /[.!?:;]$/.test(line);
 
     if (heading || bullet) {
       flushParagraph();
-      output.push(line);
-      if (!next || (heading && looksLikeHeading(next) && !isBullet(next))) output.push("");
+
+      if (bullet) {
+        // Keep wrapped bullet/question text in the same logical line.
+        let combined = line;
+        let j = i + 1;
+        while (j < rawLines.length && shouldJoinAsContinuation(rawLines[j])) {
+          combined = `${combined} ${rawLines[j]}`;
+          j += 1;
+        }
+        output.push(combined.trim());
+        i = j - 1;
+        if (j < rawLines.length && rawLines[j]) output.push("");
+        continue;
+      }
+
+      output.push(line.trim());
+      if (!next || (heading && looksLikeHeading(next) && !isBullet(next))) {
+        output.push("");
+      }
       continue;
     }
 
     paragraph = paragraph ? `${paragraph} ${line}` : line;
 
-    if (!next || looksLikeHeading(next) || isBullet(next) || endsSentence) {
+    if (!next || looksLikeHeading(next) || isBullet(next)) {
       flushParagraph();
       if (next && (looksLikeHeading(next) || isBullet(next))) output.push("");
     }
