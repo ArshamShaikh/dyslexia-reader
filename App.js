@@ -8,7 +8,6 @@ import { SettingsProvider } from "./src/context/SettingsContext";
 import HomeScreen from "./src/screens/HomeScreen";
 import ReaderScreen from "./src/screens/ReaderScreen";
 import SavedScreen from "./src/screens/SavedScreen";
-import SettingsScreen from "./src/screens/SettingsScreen";
 import { useSettings } from "./src/context/SettingsContext";
 import { THEMES } from "./src/theme/colors";
 
@@ -31,25 +30,14 @@ function MainTabs() {
           borderTopColor: theme.border,
         },
         tabBarIcon: ({ color, size }) => {
-          const icon =
-            route.name === "HomeTab"
-              ? "home"
-              : route.name === "SavedTab"
-                ? "bookmark"
-                : "settings";
+          const icon = route.name === "HomeTab" ? "home" : "bookmark";
           return <MaterialIcons name={icon} size={size} color={color} />;
         },
-        tabBarLabel:
-          route.name === "HomeTab"
-            ? "Home"
-            : route.name === "SavedTab"
-              ? "Saved"
-              : "Settings",
+        tabBarLabel: route.name === "HomeTab" ? "Home" : "Saved",
       })}
     >
       <Tab.Screen name="HomeTab" component={HomeScreen} />
       <Tab.Screen name="SavedTab" component={SavedScreen} />
-      <Tab.Screen name="SettingsTab" component={SettingsScreen} />
     </Tab.Navigator>
   );
 }

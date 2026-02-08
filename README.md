@@ -1,14 +1,14 @@
 # Dyslexia Reader
 
-Dyslexia Reader is a mobile assistive reading application built with React Native and Expo.  
+Dyslexia Reader is a mobile assistive reading application built with React Native and Expo.
 The app is designed to support learners with dyslexia and reading difficulties by providing text-to-speech reading assistance, visual text tracking, and customizable reading settings.
 
 ## Features
 
-- **Text Input**: Paste or type text for reading
+- **Text Input**: Type or paste text for reading
 - **Text-to-Speech Reading**: Converts text into spoken audio
-- **Visual Highlighting**: Guides reading with line-by-line highlighting
-- **Reading Controls**: Play, pause, and stop speech
+- **Visual Highlighting**: Guides reading with line-by-line and word highlighting
+- **Reading Controls**: Play/pause, skip controls, and speed controls
 - **Reading Speed Adjustment**: Customize speech speed
 - **Dyslexia-Friendly Fonts**: Improved readability
 - **Adjustable Font Size & Spacing**: Personalized reading comfort
@@ -17,21 +17,21 @@ The app is designed to support learners with dyslexia and reading difficulties b
 
 ## Tech Stack
 
-- **React Native** with Expo  
-- **Programming Language**: JavaScript  
-- **Text-to-Speech**: Expo Speech API (Device-based TTS)  
-- **Local Storage**: Async Storage  
-- **Navigation**: React Navigation  
-- **UI Components**: Custom accessible components  
-- **Version Control**: Git & GitHub  
+- **React Native** with Expo
+- **Programming Language**: JavaScript
+- **Text-to-Speech**: Expo Speech API (device-based TTS)
+- **Local Storage**: Async Storage
+- **Navigation**: React Navigation
+- **UI Components**: Custom accessible components
+- **Version Control**: Git & GitHub
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js  
-- npm  
-- Expo CLI  
+- Node.js
+- npm
+- Expo CLI
 - Expo Go app (for mobile testing)
 
 ### Installation
@@ -41,31 +41,36 @@ npm install
 npx expo start
 ```
 
-
-# Project Structure
+## Project Structure
 
 ```bash
 dyslexia-reader/
-│ App.js
-│ app.json
-│ package.json
-│ README.md
-│
-├── assets/
-│
-└── src/
-    ├── screens/
-    │   ├── HomeScreen.jsx
-    │   ├── ReaderScreen.jsx
-    │   ├── SettingsScreen.jsx
-    │   └── SavedTextsScreen.jsx
-    │
-    ├── services/
-    │   └── ttsService.js
-    │
-    ├── context/
-    │   └── SettingsContext.js
-    │
-    └── utils/
-        └── textHighlighter.js
+|-- App.js
+|-- app.json
+|-- package.json
+|-- README.md
+|-- assets/
+`-- src/
+    |-- components/
+    |   |-- HighlightedText.jsx
+    |   |-- ReaderControls.jsx
+    |   `-- ThemedDialog.jsx
+    |-- context/
+    |   `-- SettingsContext.js
+    |-- screens/
+    |   |-- HomeScreen.jsx
+    |   |-- ReaderScreen.jsx
+    |   `-- SavedScreen.jsx
+    |-- services/
+    |   |-- ocrService.js
+    |   |-- readerSessionService.js
+    |   |-- storageService.js
+    |   `-- ttsService.js
+    |-- theme/
+    |   |-- colors.js
+    |   `-- typography.js
+    `-- utils/
+        |-- highlightUtils.js
+        |-- ocrCleaner.js
+        `-- textParser.js
 ```
