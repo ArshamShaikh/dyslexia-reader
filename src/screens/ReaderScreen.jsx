@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Dimensions,
+  Linking,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,7 +18,9 @@ import { MaterialIcons } from "@expo/vector-icons";
 import ReaderControls from "../components/ReaderControls";
 import { useSettings } from "../context/SettingsContext";
 import {
+  getNativeVoices,
   isNativeTtsAvailable,
+  setNativeVoice,
   speakText,
   stopSpeech,
   ttsEventEmitter,
@@ -51,20 +55,32 @@ export default function ReaderScreen({ route, navigation }) {
   const [isColorDragging, setIsColorDragging] = useState(false);
   const [isHueSliding, setIsHueSliding] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [availableVoices, setAvailableVoices] = useState([]);
+  const [showAllVoices, setShowAllVoices] = useState(false);
+  const [showVoiceSection, setShowVoiceSection] = useState(false);
+  const [previewVoiceName, setPreviewVoiceName] = useState("");
   const [containerWidth, setContainerWidth] = useState(0);
   const [avgCharWidth, setAvgCharWidth] = useState(0);
   const [useNativeTts] = useState(isNativeTtsAvailable);
   const timeoutRef = useRef(null);
   const scrollViewRef = useRef(null);
   const lineOffsetsRef = useRef([]);
+  const wordOffsetsRef = useRef([]);
+  const lineHeightsRef = useRef([]);
   const speechMapRef = useRef([]);
   const speechMapIndexRef = useRef(0);
   const lastHighlightTsRef = useRef(0);
+  const currentLineIndexRef = useRef(-1);
   const pendingHighlightRef = useRef(null);
   const pendingHighlightTimerRef = useRef(null);
   const colorDragRafRef = useRef(null);
   const pendingShadePointRef = useRef({ x: 0, y: 0 });
   const draftColorRef = useRef({ hue: 0, saturation: 0, value: 1 });
+  const scrollViewportHeightRef = useRef(0);
+  const scrollContentHeightRef = useRef(0);
+  const scrollYRef = useRef(0);
+  const isUserDraggingRef = useRef(false);
+  const manualScrollHoldUntilRef = useRef(0);
   const insets = useSafeAreaInsets();
 
   const {
@@ -78,6 +94,7 @@ export default function ReaderScreen({ route, navigation }) {
     textColor,
     highlightStrength,
     readingSpeed,
+    pitch,
     highlightHue,
     highlightSaturation,
     highlightValue,
@@ -88,6 +105,9 @@ export default function ReaderScreen({ route, navigation }) {
     readingAreaSaturation,
     readingAreaValue,
     setReadingSpeed,
+    setPitch,
+    ttsVoiceName,
+    setTtsVoiceName,
     setFontSize,
     setLineHeight,
     setBackgroundTheme,
@@ -121,7 +141,7 @@ export default function ReaderScreen({ route, navigation }) {
   const effectiveWordGap = Math.max(0, Math.min(24, Number((wordSpacing * 1.8).toFixed(2))));
   const effectiveLetterSpacing = Number((letterSpacing * 0.7).toFixed(2));
   const approxCharWidth =
-    (avgCharWidth || fontSize * 0.53) + effectiveLetterSpacing * 0.45 + effectiveWordGap * 0.5;
+    (avgCharWidth || fontSize * 0.53) + effectiveLetterSpacing * 0.35;
   const paddingAllowance = fontSize >= 22 ? 14 : fontSize >= 18 ? 10 : 8;
   const safetyFactor = isLandscape
     ? fontSize >= 22
@@ -139,7 +159,7 @@ export default function ReaderScreen({ route, navigation }) {
     measuredWidth - textBoxPadding * 2 - paddingAllowance
   );
   const maxCharsPerLine = Math.max(
-    22,
+    26,
     Math.floor((availableWidth * safetyFactor) / approxCharWidth)
   );
 
@@ -213,6 +233,105 @@ export default function ReaderScreen({ route, navigation }) {
     }
     return stops;
   };
+  const openVoiceSettings = async () => {
+    if (Platform.OS === "android" && typeof Linking.sendIntent === "function") {
+      try {
+        await Linking.sendIntent("com.android.settings.TTS_SETTINGS");
+        return;
+      } catch {
+        // Fallback below
+      }
+      try {
+        await Linking.sendIntent("android.settings.TTS_SETTINGS");
+        return;
+      } catch {
+        // Fallback below
+      }
+    }
+    try {
+      await Linking.openSettings();
+    } catch {
+      // no-op
+    }
+  };
+  const previewVoice = (voiceName = "") => {
+    if (!useNativeTts) return;
+    setPreviewVoiceName(voiceName || "default");
+    stopSpeech();
+    setNativeVoice(voiceName || "");
+    speakText("Hi, this is how this voice sounds.", readingSpeed, true, pitch);
+    setTimeout(() => {
+      setPreviewVoiceName("");
+      setNativeVoice(ttsVoiceName || "");
+    }, 1200);
+  };
+  const voiceLocaleLabel = (localeTag = "") => {
+    const tag = String(localeTag).toLowerCase();
+    if (tag.startsWith("en-in")) return "Eng (IN)";
+    if (tag.startsWith("en-us")) return "Eng (US)";
+    if (tag.startsWith("en-gb")) return "Eng (UK)";
+    if (tag.startsWith("en-au")) return "Eng (AU)";
+    if (tag.startsWith("en-ca")) return "Eng (CA)";
+    if (tag.startsWith("en-ng")) return "Eng (NG)";
+    if (tag.startsWith("en")) return "Eng";
+    return "Voice";
+  };
+  const buildVoiceLabel = (voice) => {
+    const name = String(voice?.name || "");
+    const locale = String(voice?.locale || "").toLowerCase();
+    const base = voiceLocaleLabel(locale);
+    const codeMatch = name.match(/-x-([a-z0-9]+)-local$/i);
+    const variant = codeMatch?.[1] ? codeMatch[1].toUpperCase() : "";
+    return variant ? `${base} ${variant}` : base;
+  };
+  const normalizedVoices = useMemo(() => {
+    const seen = new Set();
+    const deduped = [];
+    availableVoices.forEach((voice) => {
+      const name = String(voice?.name || "");
+      if (!name || seen.has(name)) return;
+      seen.add(name);
+      deduped.push({
+        name,
+        locale: String(voice?.locale || ""),
+        label: buildVoiceLabel(voice),
+      });
+    });
+    return deduped;
+  }, [availableVoices]);
+  const allVoices = useMemo(() => {
+    return [...normalizedVoices].sort((a, b) => a.label.localeCompare(b.label));
+  }, [normalizedVoices]);
+  const recommendedVoices = useMemo(() => {
+    const preferred = ["en-in", "en-us", "en-gb", "en-au", "en-ca"];
+    const ranked = [...allVoices].sort((a, b) => {
+      const aTag = a.locale.toLowerCase();
+      const bTag = b.locale.toLowerCase();
+      const aScore = preferred.findIndex((code) => aTag.startsWith(code));
+      const bScore = preferred.findIndex((code) => bTag.startsWith(code));
+      const aRank = aScore === -1 ? 99 : aScore;
+      const bRank = bScore === -1 ? 99 : bScore;
+      if (aRank !== bRank) return aRank - bRank;
+      return a.label.localeCompare(b.label);
+    });
+    const picked = ranked.slice(0, 6);
+    if (
+      ttsVoiceName &&
+      !picked.some((voice) => voice.name === ttsVoiceName)
+    ) {
+      const selected = ranked.find((voice) => voice.name === ttsVoiceName);
+      if (selected) {
+        return [selected, ...picked.slice(0, 5)];
+      }
+    }
+    return picked;
+  }, [allVoices, ttsVoiceName]);
+  const recommendedVoiceSet = useMemo(() => {
+    return new Set(recommendedVoices.map((voice) => voice.name));
+  }, [recommendedVoices]);
+  const extraVoices = useMemo(() => {
+    return allVoices.filter((voice) => !recommendedVoiceSet.has(voice.name));
+  }, [allVoices, recommendedVoiceSet]);
   const renderHueSlider = (value, onChange, onComplete, trackColors, onStart) => (
     <View style={styles.hueSliderWrap}>
       <View style={styles.hueTrack}>
@@ -402,7 +521,30 @@ export default function ReaderScreen({ route, navigation }) {
   }, []);
 
   useEffect(() => {
+    currentLineIndexRef.current = currentLineIndex;
+  }, [currentLineIndex]);
+
+  useEffect(() => {
+    if (!useNativeTts) return;
+    let isActive = true;
+    getNativeVoices().then((voices) => {
+      if (!isActive) return;
+      setAvailableVoices(voices);
+    });
+    return () => {
+      isActive = false;
+    };
+  }, [useNativeTts]);
+
+  useEffect(() => {
+    if (!useNativeTts) return;
+    setNativeVoice(ttsVoiceName || "");
+  }, [useNativeTts, ttsVoiceName]);
+
+  useEffect(() => {
     lineOffsetsRef.current = [];
+    wordOffsetsRef.current = [];
+    lineHeightsRef.current = [];
     setCurrentLineIndex(-1);
     setCurrentWordIndex(-1);
     let isActive = true;
@@ -413,7 +555,7 @@ export default function ReaderScreen({ route, navigation }) {
     return () => {
       isActive = false;
     };
-  }, [safeText, maxCharsPerLine]);
+  }, [safeText]);
 
   const getLineRole = (line) => {
     const value = (line || "").trim();
@@ -472,32 +614,96 @@ export default function ReaderScreen({ route, navigation }) {
     return Math.max(110, Math.min(380, hold));
   };
 
-  useEffect(() => {
-    if (!scrollViewRef.current || currentLineIndex < 0) return;
-    const measuredY = lineOffsetsRef.current[currentLineIndex];
-    const estimatedY = currentLineIndex * (lineHeightPx + lineGap + 4);
-    const y = Number.isFinite(measuredY) ? measuredY : estimatedY;
-    requestAnimationFrame(() => {
-      scrollViewRef.current?.scrollTo({
-        y: Math.max(0, y - (isFullScreen ? 64 : 40)),
-        animated: true,
-      });
-    });
-  }, [currentLineIndex, isFullScreen, lineGap, lineHeightPx]);
+  const getHighlightAnchorY = (lineIndex, wordIndex) => {
+    const fallbackByContentProgress = () => {
+      const contentHeight = scrollContentHeightRef.current || 0;
+      if (contentHeight > 0 && lineWords.length > 1) {
+        const progress = clamp(lineIndex / (lineWords.length - 1), 0, 1);
+        return progress * contentHeight;
+      }
+      return lineIndex * (lineHeightPx + lineGap + 4);
+    };
+
+    const measuredY = lineOffsetsRef.current[lineIndex];
+    const measuredWordY = wordOffsetsRef.current[lineIndex]?.[wordIndex];
+    if (Number.isFinite(measuredY) && Number.isFinite(measuredWordY)) {
+      return measuredY + measuredWordY;
+    }
+
+    const measuredHeight = lineHeightsRef.current[lineIndex];
+    const lineStartY = Number.isFinite(measuredY) ? measuredY : fallbackByContentProgress();
+    if (!Number.isFinite(measuredHeight) || measuredHeight <= lineHeightPx + 2) return lineStartY;
+
+    const words = lineWords[lineIndex] || [];
+    if (!words.length || wordIndex < 0) return lineStartY;
+
+    const approxRows = Math.max(1, Math.round(measuredHeight / Math.max(1, lineHeightPx)));
+    if (approxRows <= 1) return lineStartY;
+
+    const ratio = words.length <= 1 ? 0 : wordIndex / (words.length - 1);
+    const rowIndex = Math.min(approxRows - 1, Math.max(0, Math.floor(ratio * approxRows)));
+    const measuredAnchor = lineStartY + rowIndex * lineHeightPx;
+    return Number.isFinite(measuredAnchor) ? measuredAnchor : fallbackByContentProgress();
+  };
 
   useEffect(() => {
     if (!scrollViewRef.current || currentLineIndex < 0) return;
-    // Fullscreen toggles relayout the text box. Re-sync scroll after layout settles.
-    lineOffsetsRef.current = [];
+    if (!isPlaying) return;
+    if (isUserDraggingRef.current) return;
+    if (Date.now() < manualScrollHoldUntilRef.current) return;
+    const y = getHighlightAnchorY(currentLineIndex, currentWordIndex);
+    if (!Number.isFinite(y)) return;
+    const viewportHeight = scrollViewportHeightRef.current || 0;
+    if (viewportHeight <= 0) return;
+    const currentScrollY = scrollYRef.current || 0;
+    const followThreshold = currentScrollY + viewportHeight * 0.48;
+    // Keep the active highlight around upper/mid viewport, not near bottom.
+    if (y <= followThreshold) return;
+    const desiredY = Math.max(0, y - viewportHeight * 0.30);
+    const targetY = Math.max(currentScrollY, desiredY);
+    if (Math.abs(targetY - currentScrollY) < 3) return;
+    scrollViewRef.current.scrollTo({
+      y: targetY,
+      animated: false,
+    });
+    scrollYRef.current = targetY;
+  }, [currentLineIndex, currentWordIndex, isPlaying, isFullScreen, lineGap, lineHeightPx]);
+
+  useEffect(() => {
+    if (!scrollViewRef.current) return;
+    if (isUserDraggingRef.current) return;
+    const lineIndex = currentLineIndexRef.current;
+    if (lineIndex < 0) return;
+    // Run only when layout mode changes, not on every highlight update.
+    // Do not clear measured offsets here; clearing can permanently lose layout anchors
+    // if React Native doesn't emit onLayout again for unchanged rows.
     const timer = setTimeout(() => {
-      const estimatedY = currentLineIndex * (lineHeightPx + lineGap + 4);
+      const anchorY = getHighlightAnchorY(lineIndex, currentWordIndex);
+      const estimatedY =
+        Number.isFinite(anchorY) && anchorY >= 0
+          ? anchorY
+          : lineIndex * (lineHeightPx + lineGap + 4);
+      const targetY = Math.max(0, estimatedY - (isFullScreen ? 64 : 40));
       scrollViewRef.current?.scrollTo({
-        y: Math.max(0, estimatedY - (isFullScreen ? 64 : 40)),
+        y: targetY,
         animated: false,
       });
+      scrollYRef.current = targetY;
     }, 80);
     return () => clearTimeout(timer);
-  }, [isFullScreen, currentLineIndex, lineGap, lineHeightPx]);
+  }, [isFullScreen, lineGap, lineHeightPx]);
+
+  const recenterToCurrentHighlight = (animated = true) => {
+    const lineIndex = currentLineIndexRef.current;
+    if (!scrollViewRef.current || lineIndex < 0) return;
+    const y = getHighlightAnchorY(lineIndex, currentWordIndex);
+    if (!Number.isFinite(y)) return;
+    const viewportHeight = scrollViewportHeightRef.current || 0;
+    const baseOffset = isFullScreen ? 84 : 56;
+    const targetY = Math.max(0, y - Math.max(baseOffset, viewportHeight * 0.35));
+    scrollViewRef.current.scrollTo({ y: targetY, animated });
+    scrollYRef.current = targetY;
+  };
 
   useEffect(() => {
     if (isFullScreen) {
@@ -512,6 +718,39 @@ export default function ReaderScreen({ route, navigation }) {
       handlePause();
     } else {
       handlePlay();
+    }
+  };
+
+  const seekToPosition = (lineIndex, wordIndex = 0) => {
+    const words = lineWords[lineIndex] || [];
+    if (!words.length) return;
+
+    const safeWordIndex = Math.min(Math.max(0, wordIndex), words.length - 1);
+    const wasPlaying = isPlaying;
+
+    stopSpeech();
+    stopHighlighting();
+    if (pendingHighlightTimerRef.current) {
+      clearTimeout(pendingHighlightTimerRef.current);
+      pendingHighlightTimerRef.current = null;
+    }
+    pendingHighlightRef.current = null;
+    speechMapRef.current = [];
+    speechMapIndexRef.current = 0;
+
+    setCurrentLineIndex(lineIndex);
+    setCurrentWordIndex(safeWordIndex);
+
+    if (!wasPlaying) return;
+
+    setIsPlaying(true);
+    setIsPaused(false);
+    const speechPayload = buildSpeechMap(lineIndex, safeWordIndex);
+    speechMapRef.current = speechPayload.map;
+    speechMapIndexRef.current = 0;
+    speakText(speechPayload.text, readingSpeed, useNativeTts, pitch);
+    if (!useNativeTts) {
+      startHighlighting(lineIndex, safeWordIndex);
     }
   };
 
@@ -547,7 +786,7 @@ export default function ReaderScreen({ route, navigation }) {
       const speechPayload = buildSpeechMap(startLineIndex, startWordIndex);
       speechMapRef.current = speechPayload.map;
       speechMapIndexRef.current = 0;
-      speakText(speechPayload.text, readingSpeed, useNativeTts);
+      speakText(speechPayload.text, readingSpeed, useNativeTts, pitch);
       if (!useNativeTts) {
         startHighlighting(startLineIndex, startWordIndex);
       }
@@ -586,7 +825,7 @@ export default function ReaderScreen({ route, navigation }) {
       const speechPayload = buildSpeechMap(newIndex, 0);
       speechMapRef.current = speechPayload.map;
       speechMapIndexRef.current = 0;
-      speakText(speechPayload.text, readingSpeed, useNativeTts);
+      speakText(speechPayload.text, readingSpeed, useNativeTts, pitch);
       if (!useNativeTts) {
         startHighlighting(newIndex, 0);
       }
@@ -603,7 +842,7 @@ export default function ReaderScreen({ route, navigation }) {
       const speechPayload = buildSpeechMap(newIndex, 0);
       speechMapRef.current = speechPayload.map;
       speechMapIndexRef.current = 0;
-      speakText(speechPayload.text, readingSpeed, useNativeTts);
+      speakText(speechPayload.text, readingSpeed, useNativeTts, pitch);
       if (!useNativeTts) {
         startHighlighting(newIndex, 0);
       }
@@ -628,7 +867,7 @@ export default function ReaderScreen({ route, navigation }) {
       const speechPayload = buildSpeechMap(resumeLine, resumeWord);
       speechMapRef.current = speechPayload.map;
       speechMapIndexRef.current = 0;
-      speakText(speechPayload.text, safeSpeed, useNativeTts);
+      speakText(speechPayload.text, safeSpeed, useNativeTts, pitch);
       if (!useNativeTts) {
         startHighlighting(resumeLine, resumeWord);
       }
@@ -672,6 +911,31 @@ export default function ReaderScreen({ route, navigation }) {
     advanceWord(startIndex, startWord);
   };
 
+  const applyPitchChange = (nextPitch) => {
+    const safePitch = Number(nextPitch.toFixed(2));
+    setPitch(safePitch);
+    if (!isPlaying) return;
+    stopSpeech();
+    stopHighlighting();
+    if (pendingHighlightTimerRef.current) {
+      clearTimeout(pendingHighlightTimerRef.current);
+      pendingHighlightTimerRef.current = null;
+    }
+    pendingHighlightRef.current = null;
+    setTimeout(() => {
+      setIsPlaying(true);
+      const resumeLine = currentLineIndex >= 0 ? currentLineIndex : 0;
+      const resumeWord = currentWordIndex >= 0 ? currentWordIndex : 0;
+      const speechPayload = buildSpeechMap(resumeLine, resumeWord);
+      speechMapRef.current = speechPayload.map;
+      speechMapIndexRef.current = 0;
+      speakText(speechPayload.text, readingSpeed, useNativeTts, safePitch);
+      if (!useNativeTts) {
+        startHighlighting(resumeLine, resumeWord);
+      }
+    }, 90);
+  };
+
   const stopHighlighting = () => {
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
@@ -683,37 +947,6 @@ export default function ReaderScreen({ route, navigation }) {
 
   useEffect(() => {
     if (!useNativeTts || !ttsEventEmitter) return undefined;
-    const flushHighlight = (item) => {
-      setCurrentLineIndex(item.lineIndex);
-      setCurrentWordIndex(item.wordIndex);
-      lastHighlightTsRef.current = Date.now();
-    };
-    const queueHighlight = (item) => {
-      const minInterval = getWordHoldMs(item.lineIndex, item.wordIndex);
-      const now = Date.now();
-      const elapsed = now - lastHighlightTsRef.current;
-
-      if (elapsed >= minInterval) {
-        if (pendingHighlightTimerRef.current) {
-          clearTimeout(pendingHighlightTimerRef.current);
-          pendingHighlightTimerRef.current = null;
-        }
-        pendingHighlightRef.current = null;
-        flushHighlight(item);
-        return;
-      }
-
-      pendingHighlightRef.current = item;
-      if (pendingHighlightTimerRef.current) return;
-      pendingHighlightTimerRef.current = setTimeout(() => {
-        pendingHighlightTimerRef.current = null;
-        if (pendingHighlightRef.current) {
-          flushHighlight(pendingHighlightRef.current);
-          pendingHighlightRef.current = null;
-        }
-      }, minInterval - elapsed);
-    };
-
     const rangeSub = ttsEventEmitter.addListener("tts-range", ({ start }) => {
       const map = speechMapRef.current;
       let idx = speechMapIndexRef.current;
@@ -723,7 +956,9 @@ export default function ReaderScreen({ route, navigation }) {
       if (idx < map.length) {
         speechMapIndexRef.current = idx;
         const item = map[idx];
-        queueHighlight(item);
+        setCurrentLineIndex(item.lineIndex);
+        setCurrentWordIndex(item.wordIndex);
+        lastHighlightTsRef.current = Date.now();
       }
     });
     const doneSub = ttsEventEmitter.addListener("tts-done", () => {
@@ -914,6 +1149,24 @@ export default function ReaderScreen({ route, navigation }) {
         <ScrollView
           ref={scrollViewRef}
           style={styles.textScroll}
+          onContentSizeChange={(_, contentHeight) => {
+            scrollContentHeightRef.current = contentHeight || 0;
+          }}
+          onScroll={(event) => {
+            scrollYRef.current = event.nativeEvent.contentOffset.y || 0;
+          }}
+          scrollEventThrottle={16}
+          onScrollBeginDrag={() => {
+            isUserDraggingRef.current = true;
+            manualScrollHoldUntilRef.current = Date.now() + 350;
+          }}
+          onScrollEndDrag={() => {
+            isUserDraggingRef.current = false;
+            manualScrollHoldUntilRef.current = Date.now() + 180;
+          }}
+          onLayout={(event) => {
+            scrollViewportHeightRef.current = event.nativeEvent.layout.height;
+          }}
           contentContainerStyle={[
             styles.innerScrollContent,
             isFullScreen && styles.innerScrollContentFull,
@@ -952,11 +1205,23 @@ export default function ReaderScreen({ route, navigation }) {
                 ]}
                 onLayout={(event) => {
                   lineOffsetsRef.current[index] = event.nativeEvent.layout.y;
+                  lineHeightsRef.current[index] = event.nativeEvent.layout.height;
+                  if (!wordOffsetsRef.current[index]) {
+                    wordOffsetsRef.current[index] = [];
+                  }
                 }}
               >
                 {words.map((word, wordIndex) => (
                   <Text
                     key={`${index}-${wordIndex}`}
+                    onPress={() => seekToPosition(index, wordIndex)}
+                    onLayout={(event) => {
+                      const wordY = event.nativeEvent.layout.y;
+                      if (!wordOffsetsRef.current[index]) {
+                        wordOffsetsRef.current[index] = [];
+                      }
+                      wordOffsetsRef.current[index][wordIndex] = wordY;
+                    }}
                     style={{
                       fontFamily: resolvedFontFamily,
                       fontSize: lineFontSize,
@@ -1080,6 +1345,8 @@ export default function ReaderScreen({ route, navigation }) {
         onRequestClose={() => {
           setShowQuickSettings(false);
           setSettingsTab("fonts");
+          setShowAllVoices(false);
+          setShowVoiceSection(false);
         }}
       >
         <View style={styles.quickSettingsOverlay}>
@@ -1088,6 +1355,8 @@ export default function ReaderScreen({ route, navigation }) {
             onPress={() => {
               setShowQuickSettings(false);
               setSettingsTab("fonts");
+              setShowAllVoices(false);
+              setShowVoiceSection(false);
             }}
           />
           <View
@@ -1108,6 +1377,8 @@ export default function ReaderScreen({ route, navigation }) {
                 onPress={() => {
                   setShowQuickSettings(false);
                   setSettingsTab("fonts");
+                  setShowAllVoices(false);
+                  setShowVoiceSection(false);
                 }}
               >
                 <MaterialIcons name="close" size={20} color={uiTextColor} />
@@ -1163,6 +1434,24 @@ export default function ReaderScreen({ route, navigation }) {
                   Colors
                 </Text>
               </TouchableOpacity>
+              {useNativeTts && (
+                <TouchableOpacity
+                  style={[
+                    styles.quickTab,
+                    settingsTab === "voice" && { backgroundColor: uiTextColor },
+                  ]}
+                  onPress={() => setSettingsTab("voice")}
+                >
+                  <Text
+                    style={[
+                      styles.quickTabText,
+                      { color: settingsTab === "voice" ? theme.background : uiTextColor },
+                    ]}
+                  >
+                    Voice
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             <ScrollView
@@ -1201,6 +1490,292 @@ export default function ReaderScreen({ route, navigation }) {
                       </TouchableOpacity>
                     );
                   })}
+                </View>
+              </View>
+            )}
+
+            {settingsTab === "voice" && useNativeTts && (
+              <View style={[styles.quickRow, styles.quickRowSpacing]}>
+                <TouchableOpacity
+                  style={[
+                    styles.voiceSectionHeader,
+                    { borderColor: theme.border, backgroundColor: theme.highlight },
+                  ]}
+                  onPress={() => setShowVoiceSection((prev) => !prev)}
+                >
+                  <View style={styles.voiceHeaderLeft}>
+                    <Text style={[styles.quickLabel, { color: uiTextColor }]}>Voice</Text>
+                    <Text style={[styles.voiceCurrentText, { color: uiTextColor }]}>
+                      {ttsVoiceName
+                        ? allVoices.find((v) => v.name === ttsVoiceName)?.label || "Selected"
+                        : "Default"}
+                    </Text>
+                  </View>
+                  <MaterialIcons
+                    name={showVoiceSection ? "expand-less" : "expand-more"}
+                    size={18}
+                    color={uiTextColor}
+                  />
+                </TouchableOpacity>
+                {showVoiceSection && (
+                  <>
+                    <Text style={[styles.voiceSectionLabel, { color: uiTextColor }]}>
+                      Recommended
+                    </Text>
+                    <View style={styles.quickChipRow}>
+                      <View style={styles.voiceChoice}>
+                        <TouchableOpacity
+                          style={[
+                            styles.quickChip,
+                            styles.voiceChip,
+                            !ttsVoiceName && { backgroundColor: uiTextColor },
+                            { borderColor: theme.border },
+                          ]}
+                          onPress={() => setTtsVoiceName("")}
+                        >
+                          <Text
+                            numberOfLines={1}
+                            style={[
+                              styles.quickChipText,
+                              styles.voiceChipText,
+                              { color: !ttsVoiceName ? theme.background : uiTextColor },
+                            ]}
+                          >
+                            Default
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[
+                            styles.voicePreviewButton,
+                            { borderColor: theme.border },
+                            previewVoiceName === "default" && {
+                              backgroundColor: uiTextColor,
+                            },
+                          ]}
+                          onPress={() => previewVoice("")}
+                          accessibilityLabel="Preview default voice"
+                        >
+                          <MaterialIcons
+                            name="volume-up"
+                            size={14}
+                            color={
+                              previewVoiceName === "default"
+                                ? theme.background
+                                : uiTextColor
+                            }
+                          />
+                        </TouchableOpacity>
+                      </View>
+                      {recommendedVoices.map((voice) => {
+                        const voiceName = voice.name;
+                        const shortLabel = voice.label;
+                        const isActive = ttsVoiceName === voiceName;
+                        return (
+                          <View key={voiceName} style={styles.voiceChoice}>
+                            <TouchableOpacity
+                              style={[
+                                styles.quickChip,
+                                styles.voiceChip,
+                                isActive && { backgroundColor: uiTextColor },
+                                { borderColor: theme.border },
+                              ]}
+                              onPress={() => setTtsVoiceName(voiceName)}
+                            >
+                              <Text
+                                numberOfLines={1}
+                                style={[
+                                  styles.quickChipText,
+                                  styles.voiceChipText,
+                                  { color: isActive ? theme.background : uiTextColor },
+                                ]}
+                              >
+                                {shortLabel}
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[
+                                styles.voicePreviewButton,
+                                { borderColor: theme.border },
+                                previewVoiceName === voiceName && {
+                                  backgroundColor: uiTextColor,
+                                },
+                              ]}
+                              onPress={() => previewVoice(voiceName)}
+                              accessibilityLabel={`Preview ${shortLabel} voice`}
+                            >
+                              <MaterialIcons
+                                name="volume-up"
+                                size={14}
+                                color={
+                                  previewVoiceName === voiceName
+                                    ? theme.background
+                                    : uiTextColor
+                                }
+                              />
+                            </TouchableOpacity>
+                          </View>
+                        );
+                      })}
+                    </View>
+                    {allVoices.length > recommendedVoices.length && (
+                      <TouchableOpacity
+                        style={[
+                          styles.voiceToggleButton,
+                          { borderColor: uiTextColor, backgroundColor: uiTextColor },
+                        ]}
+                        onPress={() => setShowAllVoices((prev) => !prev)}
+                      >
+                        <MaterialIcons
+                          name={showAllVoices ? "expand-less" : "expand-more"}
+                          size={14}
+                          color={theme.background}
+                        />
+                        <Text style={[styles.voiceToggleText, { color: theme.background }]}>
+                          {showAllVoices
+                            ? "Hide full voice list"
+                            : `Show all voices (${allVoices.length})`}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                    {showAllVoices && extraVoices.length > 0 && (
+                      <>
+                        <Text style={[styles.voiceSectionLabel, { color: uiTextColor }]}>
+                          All voices
+                        </Text>
+                        <View style={styles.quickChipRow}>
+                          {extraVoices.map((voice) => {
+                            const voiceName = voice.name;
+                            const shortLabel = voice.label;
+                            const isActive = ttsVoiceName === voiceName;
+                            return (
+                              <View key={voiceName} style={styles.voiceChoice}>
+                                <TouchableOpacity
+                                  style={[
+                                    styles.quickChip,
+                                    styles.voiceChip,
+                                    isActive && { backgroundColor: uiTextColor },
+                                    { borderColor: theme.border },
+                                  ]}
+                                  onPress={() => setTtsVoiceName(voiceName)}
+                                >
+                                  <Text
+                                    numberOfLines={1}
+                                    style={[
+                                      styles.quickChipText,
+                                      styles.voiceChipText,
+                                      { color: isActive ? theme.background : uiTextColor },
+                                    ]}
+                                  >
+                                    {shortLabel}
+                                  </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={[
+                                    styles.voicePreviewButton,
+                                    { borderColor: theme.border },
+                                    previewVoiceName === voiceName && {
+                                      backgroundColor: uiTextColor,
+                                    },
+                                  ]}
+                                  onPress={() => previewVoice(voiceName)}
+                                  accessibilityLabel={`Preview ${shortLabel} voice`}
+                                >
+                                  <MaterialIcons
+                                    name="volume-up"
+                                    size={14}
+                                    color={
+                                      previewVoiceName === voiceName
+                                        ? theme.background
+                                        : uiTextColor
+                                    }
+                                  />
+                                </TouchableOpacity>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      </>
+                    )}
+                    <View
+                      style={[
+                        styles.quickHelpBox,
+                        {
+                          borderColor: theme.border,
+                          backgroundColor:
+                            theme.background === "#16171A"
+                              ? "rgba(255,255,255,0.05)"
+                              : "rgba(0,0,0,0.03)",
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.quickHelpTitle, { color: uiTextColor }]}>
+                        How to add more voices
+                      </Text>
+                      <Text style={[styles.quickHelpText, { color: uiTextColor }]}>
+                        1. Open phone Settings.
+                      </Text>
+                      <Text style={[styles.quickHelpText, { color: uiTextColor }]}>
+                        2. Tap Text-to-speech output.
+                      </Text>
+                      <Text style={[styles.quickHelpText, { color: uiTextColor }]}>
+                        3. Download a new voice.
+                      </Text>
+                      <Text style={[styles.quickHelpText, { color: uiTextColor }]}>
+                        4. Come back and reopen this app.
+                      </Text>
+                      <TouchableOpacity
+                        style={[
+                          styles.voiceSettingsBtn,
+                          { borderColor: theme.border, backgroundColor: theme.highlight },
+                        ]}
+                        onPress={openVoiceSettings}
+                      >
+                        <MaterialIcons name="settings" size={14} color={uiTextColor} />
+                        <Text style={[styles.voiceSettingsBtnText, { color: uiTextColor }]}>
+                          Open voice settings
+                        </Text>
+                      </TouchableOpacity>
+                      {availableVoices.length <= 1 && (
+                        <Text style={[styles.quickHelpNote, { color: uiTextColor }]}>
+                          You currently have 1 voice on this phone.
+                        </Text>
+                      )}
+                    </View>
+                  </>
+                )}
+                <View style={styles.quickRow}>
+                  <View style={styles.quickRowHeader}>
+                    <Text style={[styles.quickLabel, { color: uiTextColor }]}>
+                      Pitch: {pitch.toFixed(2)}x
+                    </Text>
+                  </View>
+                  <View style={styles.quickSliderRow}>
+                    <Slider
+                      style={styles.quickSlider}
+                      minimumValue={0.5}
+                      maximumValue={2.0}
+                      step={0.05}
+                      value={pitch}
+                      onValueChange={(value) => applyPitchChange(value)}
+                      minimumTrackTintColor={uiTextColor}
+                      maximumTrackTintColor={theme.border}
+                      thumbTintColor={uiTextColor}
+                    />
+                    <View style={styles.quickStepperInline}>
+                      <TouchableOpacity
+                        style={styles.quickStepButton}
+                        onPress={() => applyPitchChange(stepAdjust(pitch, 0.05, 0.5, 2.0, -1))}
+                      >
+                        <Text style={[styles.quickStepText, { color: uiTextColor }]}>-</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.quickStepButton}
+                        onPress={() => applyPitchChange(stepAdjust(pitch, 0.05, 0.5, 2.0, 1))}
+                      >
+                        <Text style={[styles.quickStepText, { color: uiTextColor }]}>+</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
                 </View>
               </View>
             )}
@@ -1644,10 +2219,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 6,
-    justifyContent: "space-between",
+    justifyContent: "flex-start",
   },
   speedPresetButton: {
-    minWidth: 64,
+    width: "31%",
+    minWidth: 0,
     paddingVertical: 5,
     paddingHorizontal: 8,
     borderRadius: 8,
@@ -1678,8 +2254,108 @@ const styles = StyleSheet.create({
   quickRow: {
     gap: 6,
   },
+  quickHelpBox: {
+    marginTop: 4,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 2,
+  },
+  quickHelpTitle: {
+    fontSize: 12,
+    fontWeight: "700",
+    marginBottom: 2,
+  },
+  quickHelpText: {
+    fontSize: 11,
+    fontWeight: "500",
+  },
+  quickHelpNote: {
+    fontSize: 10,
+    fontWeight: "600",
+    marginTop: 4,
+    opacity: 0.8,
+  },
+  voiceSettingsBtn: {
+    marginTop: 6,
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  voiceSettingsBtnText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
   quickRowSpacing: {
     marginBottom: 8,
+  },
+  voiceSectionHeader: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  voiceHeaderLeft: {
+    minWidth: 0,
+    flex: 1,
+    gap: 2,
+  },
+  voiceCurrentText: {
+    fontSize: 11,
+    fontWeight: "500",
+    opacity: 0.78,
+  },
+  voiceSectionLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    opacity: 0.78,
+  },
+  voiceToggleButton: {
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderRadius: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  voiceToggleText: {
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  voiceChoice: {
+    width: "48%",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  voiceChip: {
+    flex: 1,
+    minHeight: 24,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  voiceChipText: {
+    textAlign: "center",
+    fontSize: 11,
+  },
+  voicePreviewButton: {
+    width: 26,
+    height: 24,
+    borderWidth: 1,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
   },
   quickRowHeader: {
     flexDirection: "row",

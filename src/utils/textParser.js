@@ -112,7 +112,6 @@ export const splitIntoLines = (text, maxCharsPerLine = 36) => {
       const chunks = safeSplitWord(word, longTokenLimit);
       normalizedWords.push(...chunks);
     });
-
     lines.push(normalizedWords.join(" "));
   });
 

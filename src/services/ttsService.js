@@ -68,7 +68,9 @@ const buildChunks = (text) => {
   return chunks;
 };
 
-const speakNext = (speed) => {
+const clampPitch = (value, min = 0.5, max = 2.0) => Math.max(min, Math.min(max, value));
+
+const speakNext = (speed, pitch) => {
   if (currentIndex >= queue.length) {
     isSpeaking = false;
     return;
@@ -77,9 +79,9 @@ const speakNext = (speed) => {
   currentIndex += 1;
   Speech.speak(chunk, {
     rate: speed,
-    pitch: 1.0,
+    pitch,
     language: "en",
-    onDone: () => speakNext(speed),
+    onDone: () => speakNext(speed, pitch),
     onStopped: () => {
       isSpeaking = false;
     },
@@ -93,20 +95,34 @@ const clampRate = (value, min, max) => Math.max(min, Math.min(max, value));
 
 const normalizeRate = (speed, useNative) => {
   if (!useNative) return speed;
-  // Android native TTS runs faster at 1.0; slow it down so 1x ~ 0.6.
-  return clampRate(speed * 0.6, 0.25, 1.0);
+  // Native mapping:
+  // - Keep 1.0x near natural pace (~0.85 engine rate on this device class)
+  // - Expand >1x so speed changes are clearly audible
+  // - Keep slower side usable but not too slow
+  if (speed >= 1) {
+    const boosted = 0.85 + (speed - 1) * 1.4;
+    return clampRate(boosted, 0.3, 2.0);
+  }
+  const slowed = 0.45 + speed * 0.4;
+  return clampRate(slowed, 0.3, 2.0);
 };
 
-export const speakText = (text, speed = 0.45, useNative = false) => {
+export const speakText = (text, speed = 0.45, useNative = false, pitch = 1.0) => {
   if (!text) return;
 
   stopSpeech();
 
   const rate = normalizeRate(speed, useNative);
+  const safePitch = clampPitch(Number(pitch) || 1.0);
 
   if (useNative && isNativeTtsAvailable) {
     isSpeaking = true;
-    NativeTts.speak(text, rate);
+    try {
+      NativeTts.speak(text, rate, safePitch);
+    } catch {
+      // Backward compatibility for older native builds exposing speak(text, rate).
+      NativeTts.speak(text, rate);
+    }
     return;
   }
 
@@ -114,7 +130,7 @@ export const speakText = (text, speed = 0.45, useNative = false) => {
   currentIndex = 0;
   if (!queue.length) return;
   isSpeaking = true;
-  speakNext(rate);
+  speakNext(rate, safePitch);
 };
 
 export const stopSpeech = () => {
@@ -127,4 +143,20 @@ export const stopSpeech = () => {
   isSpeaking = false;
   queue = [];
   currentIndex = 0;
+};
+
+export const getNativeVoices = async () => {
+  if (!isNativeTtsAvailable || typeof NativeTts?.getVoices !== "function") return [];
+  try {
+    const voices = await NativeTts.getVoices();
+    if (!Array.isArray(voices)) return [];
+    return voices;
+  } catch {
+    return [];
+  }
+};
+
+export const setNativeVoice = (voiceName = "") => {
+  if (!isNativeTtsAvailable || typeof NativeTts?.setVoice !== "function") return;
+  NativeTts.setVoice(voiceName || "");
 };

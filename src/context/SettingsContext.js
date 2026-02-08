@@ -13,6 +13,7 @@ const LIMITS = {
   textBoxPadding: [6, 36],
   highlightStrength: [0.2, 1.0],
   readingSpeed: [0.3, 2.0],
+  pitch: [0.5, 2.0],
   hue: [0, 360],
   channel: [0, 1],
 };
@@ -29,6 +30,8 @@ export const SettingsProvider = ({ children }) => {
   const [textColor, setTextColor] = useState(THEMES.light.text);
   const [highlightStrength, setHighlightStrength] = useState(0.6);
   const [readingSpeed, setReadingSpeed] = useState(0.6);
+  const [pitch, setPitch] = useState(1.0);
+  const [ttsVoiceName, setTtsVoiceName] = useState("");
   const [highlightHue, setHighlightHue] = useState(220);
   const [textHue, setTextHue] = useState(220);
   const [textSaturation, setTextSaturation] = useState(0.8);
@@ -83,6 +86,11 @@ export const SettingsProvider = ({ children }) => {
     setReadingSpeed,
     LIMITS.readingSpeed[0],
     LIMITS.readingSpeed[1]
+  );
+  const setSafePitch = makeSafeSetter(
+    setPitch,
+    LIMITS.pitch[0],
+    LIMITS.pitch[1]
   );
   const setSafeHighlightHue = makeSafeSetter(
     setHighlightHue,
@@ -179,6 +187,8 @@ export const SettingsProvider = ({ children }) => {
         }
         if (stored.textColor) setTextColor(stored.textColor);
         if (stored.readingSpeed) setSafeReadingSpeed(stored.readingSpeed);
+        if (typeof stored.pitch === "number") setSafePitch(stored.pitch);
+        if (typeof stored.ttsVoiceName === "string") setTtsVoiceName(stored.ttsVoiceName);
       }
       didLoadRef.current = true;
     });
@@ -204,6 +214,8 @@ export const SettingsProvider = ({ children }) => {
         textColor,
         highlightStrength,
         readingSpeed,
+        pitch,
+        ttsVoiceName,
         highlightHue,
         textHue,
         readingAreaHue,
@@ -227,6 +239,8 @@ export const SettingsProvider = ({ children }) => {
     textColor,
     highlightStrength,
     readingSpeed,
+    pitch,
+    ttsVoiceName,
     highlightHue,
     textHue,
     readingAreaHue,
@@ -298,6 +312,10 @@ export const SettingsProvider = ({ children }) => {
 
     readingSpeed,
     setReadingSpeed: setSafeReadingSpeed,
+    pitch,
+    setPitch: setSafePitch,
+    ttsVoiceName,
+    setTtsVoiceName,
     highlightHue,
     setHighlightHue: setSafeHighlightHue,
     textHue,
