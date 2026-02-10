@@ -390,7 +390,12 @@ export default function ReaderScreen({ route, navigation }) {
     const next = Math.min(max, Math.max(min, value + direction * step));
     return Number(next.toFixed(2));
   };
-  const SPEED_PRESETS = [0.6, 0.75, 0.9, 1.0, 1.25, 1.5];
+  const speedStepForDirection = (value, direction) => {
+    const speed = Number(value) || 1;
+    if (direction < 0 && speed <= 1) return 0.06;
+    return 0.05;
+  };
+  const SPEED_PRESETS = [0.5, 0.7, 0.8, 1.0, 1.25, 1.5];
   const buildHueStops = (saturation, value) => {
     const stops = [];
     for (let h = 0; h <= 360; h += 45) {
@@ -1276,6 +1281,8 @@ export default function ReaderScreen({ route, navigation }) {
         setIsPaused(false);
         return;
       }
+      scrollViewRef.current?.scrollTo({ y: 0, animated: false });
+      scrollYRef.current = 0;
       setIsPlaying(true);
       setIsPaused(false);
       const speechPayload = buildSpeechMap(0, 0);
@@ -1285,10 +1292,19 @@ export default function ReaderScreen({ route, navigation }) {
       if (!useNativeTts) {
         startHighlighting(0, 0);
       }
-      recenterToCurrentHighlight(false);
     }, 90);
     return () => clearTimeout(timer);
   }, [safeText, lineWords.length, readingSpeed, useNativeTts, pitch]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    // Keep each newly opened part anchored at top before playback/highlighting advances.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        scrollViewRef.current?.scrollTo({ y: 0, animated: false });
+        scrollYRef.current = 0;
+      });
+    });
+  }, [currentSegmentIndex]);
 
   const handlePlayPause = () => {
     if (isPlaying) {
@@ -2406,7 +2422,17 @@ export default function ReaderScreen({ route, navigation }) {
             <View style={styles.speedAdjustRow}>
               <TouchableOpacity
                 style={[styles.quickStepButton, { borderColor: theme.border }]}
-                onPress={() => applySpeedChange(stepAdjust(readingSpeed, 0.05, 0.3, 2.0, -1))}
+                onPress={() =>
+                  applySpeedChange(
+                    stepAdjust(
+                      readingSpeed,
+                      speedStepForDirection(readingSpeed, -1),
+                      0.3,
+                      2.0,
+                      -1
+                    )
+                  )
+                }
               >
                 <Text style={[styles.quickStepText, { color: uiTextColor }]}>-</Text>
               </TouchableOpacity>
@@ -2423,7 +2449,17 @@ export default function ReaderScreen({ route, navigation }) {
               />
               <TouchableOpacity
                 style={[styles.quickStepButton, { borderColor: theme.border }]}
-                onPress={() => applySpeedChange(stepAdjust(readingSpeed, 0.05, 0.3, 2.0, 1))}
+                onPress={() =>
+                  applySpeedChange(
+                    stepAdjust(
+                      readingSpeed,
+                      speedStepForDirection(readingSpeed, 1),
+                      0.3,
+                      2.0,
+                      1
+                    )
+                  )
+                }
               >
                 <Text style={[styles.quickStepText, { color: uiTextColor }]}>+</Text>
               </TouchableOpacity>
