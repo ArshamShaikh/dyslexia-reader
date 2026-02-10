@@ -1,5 +1,8 @@
 import { MaterialIcons } from "@expo/vector-icons";
+import { useMemo } from "react";
 import { Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useSettings } from "../context/SettingsContext";
+import { FONT_FAMILY_MAP, uiTrackingForFont } from "../theme/typography";
 
 export default function ThemedDialog({
   visible,
@@ -10,6 +13,20 @@ export default function ThemedDialog({
   onAction,
   onRequestClose,
 }) {
+  const { uiFontFamily } = useSettings();
+  const uiTracking = uiTrackingForFont(uiFontFamily);
+  const uiFontStyle = useMemo(
+    () =>
+      uiFontFamily === "System"
+        ? {}
+        : {
+            fontFamily: FONT_FAMILY_MAP[uiFontFamily],
+            fontWeight: "400",
+            fontStyle: "normal",
+            letterSpacing: uiTracking,
+          },
+    [uiFontFamily, uiTracking]
+  );
   const resolvedActions =
     actions.length > 0
       ? actions
@@ -67,7 +84,7 @@ export default function ThemedDialog({
                     {!!action.icon && (
                       <MaterialIcons name={action.icon} size={16} color={fg} />
                     )}
-                    <Text style={[styles.compactActionText, { color: fg }]}>{action.label}</Text>
+                    <Text style={[styles.compactActionText, { color: fg }, uiFontStyle]}>{action.label}</Text>
                   </TouchableOpacity>
                 );
               })}
@@ -80,22 +97,24 @@ export default function ThemedDialog({
                   styles.title,
                   isPickerLayout && styles.titlePicker,
                   { color: textColor },
+                  uiFontStyle,
                 ]}
               >
                 {title}
-              </Text>
-            )}
+                </Text>
+              )}
             {!!message && (
               <Text
                 style={[
                   styles.message,
                   isPickerLayout && styles.messagePicker,
                   { color: textColor },
+                  uiFontStyle,
                 ]}
               >
                 {message}
-              </Text>
-            )}
+                </Text>
+              )}
           </View>
           <View
             style={[
@@ -133,10 +152,10 @@ export default function ThemedDialog({
                   {actionIcon ? (
                     <View style={styles.actionContentColumn}>
                       <MaterialIcons name={actionIcon} size={24} color={fg} />
-                      <Text style={[styles.actionText, { color: fg }]}>{action.label}</Text>
+                      <Text style={[styles.actionText, { color: fg }, uiFontStyle]}>{action.label}</Text>
                     </View>
                   ) : (
-                    <Text style={[styles.actionText, { color: fg }]}>{action.label}</Text>
+                    <Text style={[styles.actionText, { color: fg }, uiFontStyle]}>{action.label}</Text>
                   )}
                 </TouchableOpacity>
               );

@@ -4,19 +4,25 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { StatusBar } from "expo-status-bar";
 import { useFonts } from "expo-font";
 import { MaterialIcons } from "@expo/vector-icons";
-import { SettingsProvider } from "./src/context/SettingsContext";
+import { SettingsProvider, useSettings } from "./src/context/SettingsContext";
 import HomeScreen from "./src/screens/HomeScreen";
 import ReaderScreen from "./src/screens/ReaderScreen";
 import SavedScreen from "./src/screens/SavedScreen";
-import { useSettings } from "./src/context/SettingsContext";
+import SettingsScreen from "./src/screens/SettingsScreen";
 import { THEMES } from "./src/theme/colors";
+import { FONT_FAMILY_MAP, isOpenDyslexicUi, uiSizeForFont, uiTrackingForFont } from "./src/theme/typography";
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 function MainTabs() {
-  const { backgroundTheme } = useSettings();
+  const { backgroundTheme, uiFontFamily } = useSettings();
   const theme = THEMES[backgroundTheme] || THEMES.light;
+  const tabLabelFontFamily = FONT_FAMILY_MAP[uiFontFamily];
+  const tabLabelWeight = uiFontFamily === "System" ? "700" : "400";
+  const tabLabelSize = uiSizeForFont(uiFontFamily, 12);
+  const tabLabelTop = isOpenDyslexicUi(uiFontFamily) ? -2 : -1;
+  const tabLabelTracking = uiTrackingForFont(uiFontFamily);
 
   return (
     <Tab.Navigator
@@ -28,16 +34,45 @@ function MainTabs() {
           backgroundColor:
             theme.background === "#121212" ? "rgba(32, 32, 32, 0.98)" : theme.highlight,
           borderTopColor: theme.border,
+          height: 76,
+          paddingTop: 6,
+          paddingBottom: 10,
+        },
+        tabBarItemStyle: {
+          paddingTop: 1,
+          paddingBottom: 0,
+        },
+        tabBarIconStyle: {
+          marginTop: -2,
+        },
+        tabBarLabelStyle: {
+          fontFamily: tabLabelFontFamily,
+          fontWeight: tabLabelWeight,
+          fontSize: tabLabelSize,
+          marginTop: tabLabelTop,
+          marginBottom: 4,
+          letterSpacing: tabLabelTracking,
         },
         tabBarIcon: ({ color, size }) => {
-          const icon = route.name === "HomeTab" ? "home" : "bookmark";
+          const iconMap = {
+            HomeTab: "home",
+            SavedTab: "bookmark",
+            SettingsTab: "settings",
+          };
+          const icon = iconMap[route.name] || "home";
           return <MaterialIcons name={icon} size={size} color={color} />;
         },
-        tabBarLabel: route.name === "HomeTab" ? "Home" : "Saved",
+        tabBarLabel:
+          route.name === "HomeTab"
+            ? "Home"
+            : route.name === "SavedTab"
+              ? "Saved"
+              : "Settings",
       })}
     >
       <Tab.Screen name="HomeTab" component={HomeScreen} />
       <Tab.Screen name="SavedTab" component={SavedScreen} />
+      <Tab.Screen name="SettingsTab" component={SettingsScreen} />
     </Tab.Navigator>
   );
 }

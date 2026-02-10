@@ -1,0 +1,13 @@
+SEMESTER RESULT SNAPSHOT
+
+Roll No    Name               Unit Test  Mid-Sem  Final  Grade
+42         Shah Saba          19         37       86     A
+37         Nazia Salmani      18         35       81     A-
+27         Khan Zoya          16         31       74     B+
+14         Rahil Khan         15         30       69     B
+
+Attendance Report
+Roll No    Present Days    Total Days    Attendance %
+42         92              100           92
+37         89              100           89
+27         85              100           85

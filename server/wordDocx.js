@@ -20,6 +20,24 @@ function stripTags(value = "") {
 function htmlToReadableText(html = "") {
   let text = html;
 
+  // Preserve table rows/cells from DOCX question banks and timetables.
+  text = text.replace(/<table\b[^>]*>([\s\S]*?)<\/table>/gi, (_, body = "") => {
+    const rows = [...body.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)];
+    if (!rows.length) return "";
+    const formattedRows = rows
+      .map((rowMatch) => {
+        const rowBody = rowMatch[1] || "";
+        const cells = [...rowBody.matchAll(/<t[hd]\b[^>]*>([\s\S]*?)<\/t[hd]>/gi)]
+          .map((cellMatch) => stripTags(cellMatch[1] || ""))
+          .filter(Boolean);
+        if (!cells.length) return "";
+        return cells.join(" | ");
+      })
+      .filter(Boolean);
+    if (!formattedRows.length) return "";
+    return `\n${formattedRows.join("\n")}\n`;
+  });
+
   // Preserve numbered list markers from DOCX question papers.
   text = text.replace(/<ol\b([^>]*)>([\s\S]*?)<\/ol>/gi, (_, attrs = "", body = "") => {
     const startMatch = attrs.match(/\bstart\s*=\s*["']?(\d+)["']?/i);

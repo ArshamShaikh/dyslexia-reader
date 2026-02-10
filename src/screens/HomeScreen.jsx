@@ -3,7 +3,6 @@ import { MaterialIcons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import { useMemo, useRef, useState } from "react";
 import {
-    ActivityIndicator,
     Platform,
     StyleSheet,
     Text,
@@ -14,8 +13,9 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSettings } from "../context/SettingsContext";
 import { THEMES } from "../theme/colors";
+import { FONT_FAMILY_MAP, uiSizeForFont, uiTrackingForFont } from "../theme/typography";
 import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import DocumentScanner from "react-native-document-scanner-plugin";
 import { cleanOcrText } from "../utils/ocrCleaner";
@@ -26,6 +26,7 @@ export default function HomeScreen({ navigation }) {
   const [inputText, setInputText] = useState("");
   const [textInputHeight, setTextInputHeight] = useState(120);
   const [isUploading, setIsUploading] = useState(false);
+  const [isOpeningReader, setIsOpeningReader] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [dialogConfig, setDialogConfig] = useState({
     visible: false,
@@ -34,9 +35,29 @@ export default function HomeScreen({ navigation }) {
     actions: [],
   });
   const dialogResolverRef = useRef(null);
-  const { backgroundTheme } = useSettings();
+  const { backgroundTheme, uiFontFamily } = useSettings();
   const theme = THEMES[backgroundTheme] || THEMES.light;
+  const uiTracking = uiTrackingForFont(uiFontFamily);
+  const uiFontStyle = useMemo(
+    () =>
+      uiFontFamily === "System"
+        ? {}
+        : {
+            fontFamily: FONT_FAMILY_MAP[uiFontFamily],
+            fontWeight: "400",
+            fontStyle: "normal",
+            letterSpacing: uiTracking,
+          },
+    [uiFontFamily, uiTracking]
+  );
   const uiTextColor = theme.text;
+  const titleSize = uiSizeForFont(uiFontFamily, 26);
+  const subtitleSize = uiSizeForFont(uiFontFamily, 12);
+  const actionLabelSize = uiSizeForFont(uiFontFamily, 10);
+  const isDarkTheme = backgroundTheme === "dark";
+  const statusBannerBg = isDarkTheme ? "#2A2F37" : "#F3F7FC";
+  const statusBannerBorder = isDarkTheme ? "#46505E" : "#C8D4E5";
+  const statusBannerAccent = isDarkTheme ? "#9BC7FF" : "#2C5EA8";
   const apiBaseUrl = useMemo(() => {
     // Prefer localhost for dev builds on real Android devices when using adb reverse.
     if (Platform.OS === "android" && Constants.appOwnership !== "expo") {
@@ -347,8 +368,10 @@ export default function HomeScreen({ navigation }) {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
       <View style={styles.headerContainer}>
-        <Text style={[styles.title, { color: uiTextColor }]}>Dyslexia Reader</Text>
-        <Text style={[styles.subtitle, { color: uiTextColor }]}>
+        <Text style={[styles.title, { color: uiTextColor, fontSize: titleSize }, uiFontStyle]} numberOfLines={1}>
+          Dyslexia Reader
+        </Text>
+        <Text style={[styles.subtitle, { color: uiTextColor, fontSize: subtitleSize }, uiFontStyle]}>
           Accessible Reading for Every Learner
         </Text>
       </View>
@@ -360,7 +383,7 @@ export default function HomeScreen({ navigation }) {
           styles.cardSurface,
           {
             borderColor: theme.border,
-            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : theme.highlight,
+            backgroundColor: isDarkTheme ? "#1C1C1C" : theme.highlight,
           },
         ]}
       >
@@ -373,9 +396,10 @@ export default function HomeScreen({ navigation }) {
               borderColor: "transparent",
               backgroundColor: "transparent",
             },
+            uiFontStyle,
           ]}
           placeholder="Paste or type text here..."
-          placeholderTextColor={theme.background === "#121212" ? "#9EA3A8" : "#888"}
+          placeholderTextColor={isDarkTheme ? "#9EA3A8" : "#888"}
           multiline
           value={inputText}
           onChangeText={setInputText}
@@ -387,7 +411,7 @@ export default function HomeScreen({ navigation }) {
               styles.clearButton,
               {
                 backgroundColor:
-                  theme.background === "#121212" ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)",
+                  isDarkTheme ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)",
               },
             ]}
             onPress={() => {
@@ -397,39 +421,54 @@ export default function HomeScreen({ navigation }) {
             accessibilityLabel="Clear text"
           >
             <MaterialIcons name="close" size={16} color={uiTextColor} />
-            <Text style={[styles.clearButtonText, { color: uiTextColor }]}>Clear</Text>
+            <Text style={[styles.clearButtonText, { color: uiTextColor }, uiFontStyle]}>Clear</Text>
           </TouchableOpacity>
         )}
         <TouchableOpacity
           style={[
             styles.playButton,
             {
-              backgroundColor: theme.background === "#121212" ? "#333333" : theme.highlight,
+              backgroundColor: isDarkTheme ? "#333333" : theme.highlight,
               borderColor: theme.border,
               borderWidth: 1,
             },
           ]}
           onPress={async () => {
+            if (isUploading || isOpeningReader) return;
+            setIsOpeningReader(true);
+            setStatusMessage("Opening reader...");
             const rawText = inputText || "Sample reading text will appear here.";
             let openText = rawText;
-            if (rawText.length > MAX_OPEN_CHARS) {
-              const choice = await openDialog({
-                title: "Large document",
-                message: `This document is extremely large. To keep the app stable, we will open the first ${MAX_OPEN_CHARS.toLocaleString()} characters in chunked reading mode.`,
-                actions: [
-                  { label: "Cancel", value: "cancel" },
-                  { label: "Continue", value: "continue", tone: "primary" },
-                ],
+            try {
+              // Allow status banner to render before heavy reader initialization.
+              await new Promise((resolve) => setTimeout(resolve, 60));
+              if (rawText.length > MAX_OPEN_CHARS) {
+                const choice = await openDialog({
+                  title: "Large document",
+                  message: `This document is extremely large. To keep the app stable, we will open the first ${MAX_OPEN_CHARS.toLocaleString()} characters in chunked reading mode.`,
+                  actions: [
+                    { label: "Cancel", value: "cancel" },
+                    { label: "Continue", value: "continue", tone: "primary" },
+                  ],
+                });
+                if (choice !== "continue") return;
+                openText = rawText.slice(0, MAX_OPEN_CHARS);
+              }
+              const sessionId = createReaderSession(openText);
+              navigation.navigate("Reader", {
+                sessionId,
+                text: openText.slice(0, 20000),
               });
-              if (choice !== "continue") return;
-              openText = rawText.slice(0, MAX_OPEN_CHARS);
+            } finally {
+              setTimeout(() => {
+                setIsOpeningReader(false);
+                setStatusMessage((prev) =>
+                  prev === "Opening reader..." ? "" : prev
+                );
+              }, 200);
             }
-            const sessionId = createReaderSession(openText);
-            navigation.navigate("Reader", {
-              sessionId,
-              text: openText.slice(0, 20000),
-            });
           }}
+          disabled={isUploading || isOpeningReader}
           accessible={true}
           accessibilityLabel="Start reading"
         >
@@ -443,7 +482,7 @@ export default function HomeScreen({ navigation }) {
           styles.cardSurface,
           {
             borderColor: theme.border,
-            backgroundColor: theme.background === "#121212" ? "#1C1C1C" : theme.highlight,
+            backgroundColor: isDarkTheme ? "#1C1C1C" : theme.highlight,
           },
         ]}
       >
@@ -453,7 +492,7 @@ export default function HomeScreen({ navigation }) {
             {
               borderColor: theme.border,
               backgroundColor:
-                theme.background === "#121212" ? "#1C1C1C" : theme.highlight,
+                isDarkTheme ? "#1C1C1C" : theme.highlight,
             },
           ]}
           onPress={handlePickFile}
@@ -461,7 +500,7 @@ export default function HomeScreen({ navigation }) {
           accessibilityLabel="Attach file"
         >
           <MaterialIcons name="folder-open" size={22} color={uiTextColor} />
-          <Text style={[styles.actionLabel, { color: uiTextColor }]}>File</Text>
+          <Text style={[styles.actionLabel, { color: uiTextColor, fontSize: actionLabelSize }, uiFontStyle]}>File</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[
@@ -469,7 +508,7 @@ export default function HomeScreen({ navigation }) {
             {
               borderColor: theme.border,
               backgroundColor:
-                theme.background === "#121212" ? "#1C1C1C" : theme.highlight,
+                isDarkTheme ? "#1C1C1C" : theme.highlight,
             },
           ]}
           onPress={handlePickPhoto}
@@ -477,7 +516,7 @@ export default function HomeScreen({ navigation }) {
           accessibilityLabel="Choose photos"
         >
           <MaterialIcons name="photo-library" size={22} color={uiTextColor} />
-          <Text style={[styles.actionLabel, { color: uiTextColor }]}>Photos</Text>
+          <Text style={[styles.actionLabel, { color: uiTextColor, fontSize: actionLabelSize }, uiFontStyle]}>Photos</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[
@@ -485,7 +524,7 @@ export default function HomeScreen({ navigation }) {
             {
               borderColor: theme.border,
               backgroundColor:
-                theme.background === "#121212" ? "#1C1C1C" : theme.highlight,
+                isDarkTheme ? "#1C1C1C" : theme.highlight,
             },
           ]}
           onPress={handleCameraScan}
@@ -493,24 +532,24 @@ export default function HomeScreen({ navigation }) {
           accessibilityLabel="Scan with camera"
         >
           <MaterialIcons name="photo-camera" size={22} color={uiTextColor} />
-          <Text style={[styles.actionLabel, { color: uiTextColor }]}>Camera</Text>
+          <Text style={[styles.actionLabel, { color: uiTextColor, fontSize: actionLabelSize }, uiFontStyle]}>Camera</Text>
         </TouchableOpacity>
       </View>
 
       <View style={styles.placeholderFeature}>
-        {(isUploading || statusMessage) && (
+        {(isUploading || isOpeningReader || statusMessage) && (
           <View
             style={[
               styles.uploadStatusBanner,
               {
-                borderColor: theme.border,
-                backgroundColor:
-                  theme.background === "#121212" ? "#242424" : "#F5F5F5",
+                borderColor: statusBannerBorder,
+                backgroundColor: statusBannerBg,
               },
             ]}
           >
-            <ActivityIndicator size="small" color={uiTextColor} />
-            <Text style={[styles.uploadStatusText, { color: uiTextColor }]}>
+            <View style={[styles.uploadStatusDot, { backgroundColor: statusBannerAccent }]} />
+            <MaterialIcons name="cloud-upload" size={16} color={statusBannerAccent} />
+            <Text style={[styles.uploadStatusText, { color: uiTextColor }, uiFontStyle]}>
               {statusMessage || "Uploading..."}
             </Text>
           </View>
@@ -666,6 +705,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
   },
+  uploadStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 99,
+  },
   inputActions: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -702,3 +746,4 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
 });
+

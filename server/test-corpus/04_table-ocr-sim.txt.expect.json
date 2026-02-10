@@ -1,0 +1,6 @@
+{
+  "minChars": 250,
+  "minTableRows": 8,
+  "requiredContains": ["Semester Result Snapshot", "Attendance Report", "Attendance %"],
+  "requiredRegex": ["Roll No\\s+\\|\\s+Name"]
+}

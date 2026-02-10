@@ -35,6 +35,7 @@ Language & Comprehension
 22. Tap word -> pronunciation
 23. Simple meaning lookup
 24. Syllable breakdown
+24b. Heading/chapter index navigation for long documents
 
 BACKEND
 Supabase Integration

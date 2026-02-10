@@ -75,3 +75,10 @@ This document lists lower-priority features that can be implemented later, with:
     - Most replayed sections (optional)
   - Use neutral language and avoid pressure-oriented scoring.
 
+## 34. Heading/chapter index navigation
+- Use case: Makes large textbooks easier to navigate by jumping through section titles instead of scrolling through parts one by one.
+- Implementation:
+  - During extraction, detect heading-like lines (`Chapter`, `Unit`, numbered headings like `1.2`).
+  - Store index entries as `{ title, segmentIndex, lineHint }`.
+  - Add an `Index` view in Reader part navigator.
+  - On tap, jump directly to the matched segment and anchor line.

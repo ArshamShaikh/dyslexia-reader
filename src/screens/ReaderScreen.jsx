@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Dimensions,
+  Keyboard,
   Linking,
   Modal,
   PanResponder,
@@ -9,6 +11,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -28,20 +31,24 @@ import {
 import { splitIntoLines, splitIntoSegments } from "../utils/textParser";
 import { THEMES } from "../theme/colors";
 import { FONT_FAMILY_MAP } from "../theme/typography";
-import { addSavedText, isTextSaved } from "../services/storageService";
+import { addSavedText, getSavedTexts, isTextSaved } from "../services/storageService";
 import { getReaderSessionText } from "../services/readerSessionService";
 
 
 export default function ReaderScreen({ route, navigation }) {
   const { text = "", sessionId = "" } = route.params || {};
   const MAX_TOTAL_CHARS = 500000;
-  const SEGMENT_CHARS = 14000;
+  // Keep each spoken part safely below Android TTS single-utterance limits
+  // across device vendors (some engines fail above ~2k chars).
+  const SEGMENT_CHARS = 1800;
   const sessionText = getReaderSessionText(sessionId);
   const sourceText = sessionText || text || SAMPLE_TEXT;
-  const fullText =
+  const initialFullText =
     sourceText.length > MAX_TOTAL_CHARS
       ? sourceText.slice(0, MAX_TOTAL_CHARS)
       : sourceText;
+  const [editableFullText, setEditableFullText] = useState(initialFullText);
+  const fullText = editableFullText;
   const segments = useMemo(
     () => splitIntoSegments(fullText, SEGMENT_CHARS),
     [fullText]
@@ -51,11 +58,18 @@ export default function ReaderScreen({ route, navigation }) {
   const [currentLineIndex, setCurrentLineIndex] = useState(-1);
   const [currentWordIndex, setCurrentWordIndex] = useState(-1);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
+  const [, setIsPaused] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editDraftText, setEditDraftText] = useState("");
   const [saveNotice, setSaveNotice] = useState("");
   const toastTimerRef = useRef(null);
   const [showQuickSettings, setShowQuickSettings] = useState(false);
   const [showSpeedPanel, setShowSpeedPanel] = useState(false);
+  const [partInputValue, setPartInputValue] = useState("1");
+  const [partSearchQuery, setPartSearchQuery] = useState("");
+  const [partSearchCursor, setPartSearchCursor] = useState(-1);
+  const [isSegmentLoading, setIsSegmentLoading] = useState(false);
+  const [segmentStatusMessage, setSegmentStatusMessage] = useState("");
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [settingsTab, setSettingsTab] = useState("fonts");
   const [activeColorTarget, setActiveColorTarget] = useState("text");
@@ -67,7 +81,16 @@ export default function ReaderScreen({ route, navigation }) {
   const [shadeBoxSize, setShadeBoxSize] = useState({ width: 1, height: 1 });
   const [isColorDragging, setIsColorDragging] = useState(false);
   const [isHueSliding, setIsHueSliding] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [isSaved, setIsSaved] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [showSaveFolderPicker, setShowSaveFolderPicker] = useState(false);
+  const [saveFolderOptions, setSaveFolderOptions] = useState([]);
+  const [selectedSaveFolder, setSelectedSaveFolder] = useState("");
+  const [showSaveNewFolderInput, setShowSaveNewFolderInput] = useState(false);
+  const [saveFolderInput, setSaveFolderInput] = useState("");
+  const [saveTitleInput, setSaveTitleInput] = useState("");
+  const [isSaveFolderLoading, setIsSaveFolderLoading] = useState(false);
   const [availableVoices, setAvailableVoices] = useState([]);
   const [showAllVoices, setShowAllVoices] = useState(false);
   const [showVoiceSection, setShowVoiceSection] = useState(false);
@@ -77,9 +100,13 @@ export default function ReaderScreen({ route, navigation }) {
   const [useNativeTts] = useState(isNativeTtsAvailable);
   const timeoutRef = useRef(null);
   const scrollViewRef = useRef(null);
+  const scrollContentRef = useRef(null);
+  const wordRefsRef = useRef([]);
   const lineOffsetsRef = useRef([]);
   const wordOffsetsRef = useRef([]);
   const lineHeightsRef = useRef([]);
+  const lineLayoutSignatureRef = useRef([]);
+  const wordLayoutSignatureRef = useRef([]);
   const speechMapRef = useRef([]);
   const speechMapIndexRef = useRef(0);
   const currentSegmentIndexRef = useRef(0);
@@ -87,16 +114,31 @@ export default function ReaderScreen({ route, navigation }) {
   const resumeOnNextSegmentRef = useRef(false);
   const lastHighlightTsRef = useRef(0);
   const currentLineIndexRef = useRef(-1);
+  const currentWordIndexRef = useRef(-1);
   const pendingHighlightRef = useRef(null);
   const pendingHighlightTimerRef = useRef(null);
+  const recenterRetryTimerRef = useRef(null);
+  const pendingSearchTargetRef = useRef(null);
+  const exactSearchRecenterTimerRef = useRef(null);
   const colorDragRafRef = useRef(null);
   const pendingShadePointRef = useRef({ x: 0, y: 0 });
   const draftColorRef = useRef({ hue: 0, saturation: 0, value: 1 });
   const scrollViewportHeightRef = useRef(0);
   const scrollContentHeightRef = useRef(0);
   const scrollYRef = useRef(0);
+  const partInputRef = useRef(null);
+  const searchInputRef = useRef(null);
+  const editInputRef = useRef(null);
+  const moveToNextSegmentRef = useRef(null);
+  const isPlayingRef = useRef(false);
+  const isVoicePreviewingRef = useRef(false);
+  const previewTimerRef = useRef(null);
   const isUserDraggingRef = useRef(false);
   const manualScrollHoldUntilRef = useRef(0);
+  const segmentSwitchTokenRef = useRef(0);
+  const appliedSearchFocusKeyRef = useRef("");
+  const seekToPositionRef = useRef(null);
+  const recenterToCurrentHighlightRef = useRef(null);
   const insets = useSafeAreaInsets();
 
   const {
@@ -145,9 +187,12 @@ export default function ReaderScreen({ route, navigation }) {
   const uiTextColor = theme.text;
   const readerTextColor = textColor;
   const resolvedFontFamily = FONT_FAMILY_MAP[fontFamily];
-  const isDarkBackground = theme.background === "#121212";
+  const isDarkBackground = backgroundTheme === "dark";
   const uiButtonBg = isDarkBackground ? "#2B2B2B" : theme.highlight;
   const uiButtonIcon = uiTextColor;
+  const statusBarBg = isDarkBackground ? "#2A2F37" : "#F3F7FC";
+  const statusBarBorder = isDarkBackground ? "#46505E" : "#C8D4E5";
+  const statusBarAccent = isDarkBackground ? "#9BC7FF" : "#2C5EA8";
   const windowWidth = Dimensions.get("window").width;
   const measuredWidth = containerWidth || windowWidth;
   const isLandscape = windowWidth > Dimensions.get("window").height;
@@ -186,6 +231,107 @@ export default function ReaderScreen({ route, navigation }) {
   const lineWords = useMemo(() => {
     return lines.map((line) => line.split(/\s+/).filter(Boolean));
   }, [lines]);
+  const lineWordStarts = useMemo(() => {
+    const starts = [];
+    let acc = 0;
+    for (let i = 0; i < lineWords.length; i += 1) {
+      starts.push(acc);
+      acc += lineWords[i].length;
+    }
+    return starts;
+  }, [lineWords]);
+  const totalWordCount = useMemo(() => {
+    if (!lineWords.length) return 0;
+    const lastLine = lineWords[lineWords.length - 1] || [];
+    return (lineWordStarts[lineWordStarts.length - 1] || 0) + lastLine.length;
+  }, [lineWordStarts, lineWords]);
+  const normalizedPartSearchQuery = partSearchQuery.trim().toLowerCase();
+  const partSearchMatches = useMemo(() => {
+    if (!normalizedPartSearchQuery) return [];
+    const matches = [];
+    for (let i = 0; i < segments.length; i += 1) {
+      if (String(segments[i] || "").toLowerCase().includes(normalizedPartSearchQuery)) {
+        matches.push(i);
+      }
+    }
+    return matches;
+  }, [segments, normalizedPartSearchQuery]);
+  const currentMatchPart =
+    partSearchCursor >= 0 && partSearchCursor < partSearchMatches.length
+      ? partSearchMatches[partSearchCursor]
+      : -1;
+  const searchTokens = useMemo(() => {
+    if (!normalizedPartSearchQuery) return [];
+    return normalizedPartSearchQuery.split(/\s+/).filter(Boolean);
+  }, [normalizedPartSearchQuery]);
+  const isSearchWordMatch = useCallback(
+    (word) => {
+      if (!searchTokens.length) return false;
+      const normalized = String(word || "")
+        .toLowerCase()
+        .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, "");
+      if (!normalized) return false;
+      return searchTokens.some((token) => normalized.includes(token));
+    },
+    [searchTokens]
+  );
+
+  const findFirstWordMatchInCurrentSegment = useCallback(
+    (query) => {
+      const tokens = String(query || "")
+        .trim()
+        .toLowerCase()
+        .split(/\s+/)
+        .map((token) =>
+          token.replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, "")
+        )
+        .filter(Boolean);
+      if (!tokens.length) return null;
+
+      const wordEntries = [];
+      for (let lineIndex = 0; lineIndex < lineWords.length; lineIndex += 1) {
+        const words = lineWords[lineIndex] || [];
+        for (let wordIndex = 0; wordIndex < words.length; wordIndex += 1) {
+          const normalizedWord = String(words[wordIndex] || "")
+            .toLowerCase()
+            .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, "");
+          if (!normalizedWord) continue;
+          wordEntries.push({ lineIndex, wordIndex, normalizedWord });
+        }
+      }
+      if (!wordEntries.length) return null;
+
+      const tokenMatches = (word, token) => word.includes(token);
+
+      for (let i = 0; i < wordEntries.length; i += 1) {
+        if (!tokenMatches(wordEntries[i].normalizedWord, tokens[0])) continue;
+        if (tokens.length === 1) {
+          return {
+            lineIndex: wordEntries[i].lineIndex,
+            wordIndex: wordEntries[i].wordIndex,
+          };
+        }
+
+        let fullPhraseMatch = true;
+        for (let j = 1; j < tokens.length; j += 1) {
+          const candidate = wordEntries[i + j];
+          if (!candidate || !tokenMatches(candidate.normalizedWord, tokens[j])) {
+            fullPhraseMatch = false;
+            break;
+          }
+        }
+        if (fullPhraseMatch) {
+          return {
+            lineIndex: wordEntries[i].lineIndex,
+            wordIndex: wordEntries[i].wordIndex,
+          };
+        }
+      }
+
+      return null;
+    },
+    [lineWords]
+  );
 
   const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
   const setDraftColorSafe = (updater) => {
@@ -195,7 +341,7 @@ export default function ReaderScreen({ route, navigation }) {
       return next;
     });
   };
-  const hsvToHex = (h, s, v) => {
+  const hsvToHex = useCallback((h, s, v) => {
     const hue = ((Number(h) % 360) + 360) % 360;
     const sat = clamp(Number(s), 0, 1);
     const val = clamp(Number(v), 0, 1);
@@ -216,7 +362,7 @@ export default function ReaderScreen({ route, navigation }) {
         .toString(16)
         .padStart(2, "0");
     return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-  };
+  }, []);
   const toRgba = (hex, alpha) => {
     const cleanHex = hex.replace("#", "");
     if (cleanHex.length !== 6) return `rgba(0, 0, 0, ${alpha})`;
@@ -237,6 +383,9 @@ export default function ReaderScreen({ route, navigation }) {
   const lineHighlight = toRgba(highlightBase, lineAlpha);
   const wordHighlight = toRgba(highlightBase, wordAlpha);
   const wordTextColor = readerTextColor;
+  const searchMatchBg = isDarkBackground
+    ? "rgba(255, 215, 64, 0.36)"
+    : "rgba(255, 235, 59, 0.55)";
   const stepAdjust = (value, step, min, max, direction) => {
     const next = Math.min(max, Math.max(min, value + direction * step));
     return Number(next.toFixed(2));
@@ -270,18 +419,34 @@ export default function ReaderScreen({ route, navigation }) {
       // no-op
     }
   };
+  const blurInlineInputs = () => {
+    partInputRef.current?.blur?.();
+    searchInputRef.current?.blur?.();
+  };
   const previewVoice = (voiceName = "") => {
     if (!useNativeTts) return;
+    if (previewTimerRef.current) {
+      clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+    }
+    isVoicePreviewingRef.current = true;
+    const wasPlaying = isPlayingRef.current;
     setPreviewVoiceName(voiceName || "default");
     stopSpeech();
+    if (wasPlaying) {
+      setIsPlaying(false);
+      setIsPaused(true);
+    }
     setNativeVoice(voiceName || "");
     speakText("Hi, this is how this voice sounds.", readingSpeed, true, pitch);
-    setTimeout(() => {
+    previewTimerRef.current = setTimeout(() => {
+      isVoicePreviewingRef.current = false;
       setPreviewVoiceName("");
       setNativeVoice(ttsVoiceName || "");
+      previewTimerRef.current = null;
     }, 1200);
   };
-  const voiceLocaleLabel = (localeTag = "") => {
+  const voiceLocaleLabel = useCallback((localeTag = "") => {
     const tag = String(localeTag).toLowerCase();
     if (tag.startsWith("en-in")) return "Eng (IN)";
     if (tag.startsWith("en-us")) return "Eng (US)";
@@ -291,15 +456,16 @@ export default function ReaderScreen({ route, navigation }) {
     if (tag.startsWith("en-ng")) return "Eng (NG)";
     if (tag.startsWith("en")) return "Eng";
     return "Voice";
-  };
-  const buildVoiceLabel = (voice) => {
+  }, []);
+  const buildVoiceLabel = useCallback((voice) => {
     const name = String(voice?.name || "");
     const locale = String(voice?.locale || "").toLowerCase();
     const base = voiceLocaleLabel(locale);
     const codeMatch = name.match(/-x-([a-z0-9]+)-local$/i);
     const variant = codeMatch?.[1] ? codeMatch[1].toUpperCase() : "";
     return variant ? `${base} ${variant}` : base;
-  };
+  }, [voiceLocaleLabel]);
+  // Derived from runtime voice metadata; memoized on source list.
   const normalizedVoices = useMemo(() => {
     const seen = new Set();
     const deduped = [];
@@ -314,7 +480,7 @@ export default function ReaderScreen({ route, navigation }) {
       });
     });
     return deduped;
-  }, [availableVoices]);
+  }, [availableVoices, buildVoiceLabel]);
   const allVoices = useMemo(() => {
     return [...normalizedVoices].sort((a, b) => a.label.localeCompare(b.label));
   }, [normalizedVoices]);
@@ -411,6 +577,7 @@ export default function ReaderScreen({ route, navigation }) {
   );
   const SV_COLS = 18;
   const SV_ROWS = 10;
+  // Shade grid intentionally keyed to hue changes for responsiveness while dragging.
   const activeShadeGrid = useMemo(() => {
     const rows = [];
     for (let r = 0; r < SV_ROWS; r += 1) {
@@ -423,16 +590,16 @@ export default function ReaderScreen({ route, navigation }) {
       rows.push(cols);
     }
     return rows;
-  }, [activeInteractiveColor.hue]);
-  const commitDraftColor = (override) => {
+  }, [activeInteractiveColor.hue, hsvToHex]);
+  const commitDraftColor = useCallback((override) => {
     const source = override
       ? { ...draftColorRef.current, ...override }
       : draftColorRef.current;
     activeColor.setHue(Number(source.hue.toFixed(0)));
     activeColor.setSaturation(Number(source.saturation.toFixed(3)));
     activeColor.setValue(Number(source.value.toFixed(3)));
-  };
-  const getSVFromPoint = (x, y) => {
+  }, [activeColor]);
+  const getSVFromPoint = useCallback((x, y) => {
     const width = Math.max(1, shadeBoxSize.width);
     const height = Math.max(1, shadeBoxSize.height);
     const clampedX = clamp(x, 0, width);
@@ -441,15 +608,15 @@ export default function ReaderScreen({ route, navigation }) {
       saturation: Number((clampedX / width).toFixed(3)),
       value: Number((1 - clampedY / height).toFixed(3)),
     };
-  };
-  const updateActiveSVFromPoint = (x, y) => {
+  }, [shadeBoxSize.height, shadeBoxSize.width]);
+  const updateActiveSVFromPoint = useCallback((x, y) => {
     const nextSV = getSVFromPoint(x, y);
     setDraftColorSafe((prev) => ({
       ...prev,
       ...nextSV,
     }));
-  };
-  const flushPendingShadeUpdate = () => {
+  }, [getSVFromPoint]);
+  const flushPendingShadeUpdate = useCallback(() => {
     if (!colorDragRafRef.current) return null;
     cancelAnimationFrame(colorDragRafRef.current);
     colorDragRafRef.current = null;
@@ -460,8 +627,8 @@ export default function ReaderScreen({ route, navigation }) {
       ...nextSV,
     }));
     return nextSV;
-  };
-  const queueActiveSVUpdate = (x, y) => {
+  }, [getSVFromPoint]);
+  const queueActiveSVUpdate = useCallback((x, y) => {
     pendingShadePointRef.current = { x, y };
     if (colorDragRafRef.current) return;
     colorDragRafRef.current = requestAnimationFrame(() => {
@@ -469,7 +636,8 @@ export default function ReaderScreen({ route, navigation }) {
       const { x: px, y: py } = pendingShadePointRef.current;
       updateActiveSVFromPoint(px, py);
     });
-  };
+  }, [updateActiveSVFromPoint]);
+  // PanResponder callbacks are ref-driven; keep dependency surface minimal for touch smoothness.
   const shadePanResponder = useMemo(
     () =>
       PanResponder.create({
@@ -498,9 +666,17 @@ export default function ReaderScreen({ route, navigation }) {
           setIsColorDragging(false);
         },
       }),
-    [activeColor.hue, activeColor.saturation, activeColor.value]
+    [
+      activeColor.hue,
+      activeColor.saturation,
+      activeColor.value,
+      commitDraftColor,
+      flushPendingShadeUpdate,
+      queueActiveSVUpdate,
+    ]
   );
 
+  // Auto-follow uses live scroll refs; exhaustive deps cause jitter loops.
   useEffect(() => {
     if (isColorDragging || isHueSliding) return;
     setDraftColorSafe({
@@ -518,8 +694,10 @@ export default function ReaderScreen({ route, navigation }) {
   ]);
 
   // Cleanup timeout on unmount
+  // Layout-mode recenter only; highlight refs intentionally read inside timer.
   useEffect(() => {
     return () => {
+      stopSpeech();
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
@@ -529,6 +707,20 @@ export default function ReaderScreen({ route, navigation }) {
       if (pendingHighlightTimerRef.current) {
         clearTimeout(pendingHighlightTimerRef.current);
       }
+      if (recenterRetryTimerRef.current) {
+        clearTimeout(recenterRetryTimerRef.current);
+        recenterRetryTimerRef.current = null;
+      }
+      if (exactSearchRecenterTimerRef.current) {
+        clearTimeout(exactSearchRecenterTimerRef.current);
+        exactSearchRecenterTimerRef.current = null;
+      }
+      pendingSearchTargetRef.current = null;
+      if (previewTimerRef.current) {
+        clearTimeout(previewTimerRef.current);
+        previewTimerRef.current = null;
+      }
+      isVoicePreviewingRef.current = false;
       if (colorDragRafRef.current) {
         cancelAnimationFrame(colorDragRafRef.current);
         colorDragRafRef.current = null;
@@ -537,12 +729,85 @@ export default function ReaderScreen({ route, navigation }) {
   }, []);
 
   useEffect(() => {
+    const unsubBlur = navigation.addListener("blur", () => {
+      stopSpeech();
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      if (pendingHighlightTimerRef.current) {
+        clearTimeout(pendingHighlightTimerRef.current);
+        pendingHighlightTimerRef.current = null;
+      }
+      pendingHighlightRef.current = null;
+      setIsPlaying(false);
+      setIsPaused(false);
+      setCurrentLineIndex(-1);
+      setCurrentWordIndex(-1);
+    });
+    return unsubBlur;
+  }, [navigation]);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener("keyboardDidShow", (event) => {
+      const nextHeight = event?.endCoordinates?.height || 0;
+      setKeyboardHeight(nextHeight);
+    });
+    const hideSub = Keyboard.addListener("keyboardDidHide", () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  // Resume is triggered by segment transitions and controlled runtime refs.
+  useEffect(() => {
     currentLineIndexRef.current = currentLineIndex;
   }, [currentLineIndex]);
+  useEffect(() => {
+    currentWordIndexRef.current = currentWordIndex;
+  }, [currentWordIndex]);
+
+  // Native TTS listeners are ref-guarded to avoid false transitions from preview/demo.
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
 
   useEffect(() => {
     currentSegmentIndexRef.current = currentSegmentIndex;
   }, [currentSegmentIndex]);
+
+  useEffect(() => {
+    if (!normalizedPartSearchQuery) {
+      if (partSearchCursor !== -1) setPartSearchCursor(-1);
+      appliedSearchFocusKeyRef.current = "";
+      return;
+    }
+    if (!partSearchMatches.length) {
+      if (partSearchCursor !== -1) setPartSearchCursor(-1);
+      appliedSearchFocusKeyRef.current = "";
+      return;
+    }
+    if (partSearchCursor >= partSearchMatches.length) {
+      setPartSearchCursor(-1);
+    }
+  }, [
+    normalizedPartSearchQuery,
+    partSearchMatches,
+    partSearchCursor,
+  ]);
+
+  useEffect(() => {
+    setPartInputValue(String(currentSegmentIndex + 1));
+  }, [currentSegmentIndex]);
+
+  useEffect(() => {
+    setEditableFullText(initialFullText);
+    setIsEditMode(false);
+    setEditDraftText("");
+  }, [initialFullText]);
 
   useEffect(() => {
     segmentCountRef.current = segments.length;
@@ -555,7 +820,22 @@ export default function ReaderScreen({ route, navigation }) {
   useEffect(() => {
     resumeOnNextSegmentRef.current = false;
     setCurrentSegmentIndex(0);
-  }, [fullText]);
+    setIsSegmentLoading(false);
+    setSegmentStatusMessage("");
+    setPartSearchQuery("");
+    setPartSearchCursor(-1);
+  }, [initialFullText]);
+
+  useEffect(() => {
+    if (!isSegmentLoading) return;
+    const token = segmentSwitchTokenRef.current;
+    const timer = setTimeout(() => {
+      if (segmentSwitchTokenRef.current !== token) return;
+      setIsSegmentLoading(false);
+      setSegmentStatusMessage("");
+    }, 220);
+    return () => clearTimeout(timer);
+  }, [safeText, lines.length, isSegmentLoading]);
 
   useEffect(() => {
     if (!useNativeTts) return;
@@ -577,7 +857,11 @@ export default function ReaderScreen({ route, navigation }) {
   useEffect(() => {
     lineOffsetsRef.current = [];
     wordOffsetsRef.current = [];
+    wordRefsRef.current = [];
     lineHeightsRef.current = [];
+    lineLayoutSignatureRef.current = [];
+    wordLayoutSignatureRef.current = [];
+    pendingSearchTargetRef.current = null;
     scrollYRef.current = 0;
     scrollContentHeightRef.current = 0;
     setCurrentLineIndex(-1);
@@ -591,6 +875,17 @@ export default function ReaderScreen({ route, navigation }) {
       isActive = false;
     };
   }, [safeText, fullText]);
+
+  useEffect(() => {
+    // Invalidate cached row/word anchors when wrapping metrics change.
+    lineOffsetsRef.current = [];
+    wordOffsetsRef.current = [];
+    wordRefsRef.current = [];
+    lineHeightsRef.current = [];
+    lineLayoutSignatureRef.current = [];
+    wordLayoutSignatureRef.current = [];
+    pendingSearchTargetRef.current = null;
+  }, [safeText, maxCharsPerLine, lineHeightPx, effectiveWordGap, effectiveLetterSpacing]);
 
   const getLineRole = (line) => {
     const value = (line || "").trim();
@@ -680,6 +975,67 @@ export default function ReaderScreen({ route, navigation }) {
     const measuredAnchor = lineStartY + rowIndex * lineHeightPx;
     return Number.isFinite(measuredAnchor) ? measuredAnchor : fallbackByContentProgress();
   };
+  const getMeasuredHighlightAnchorY = (lineIndex, wordIndex) => {
+    const currentLine = String(lines[lineIndex] || "");
+    const currentWord = String(lineWords[lineIndex]?.[wordIndex] || "");
+    if (!currentLine || !currentWord) return NaN;
+    const measuredLineSignature = lineLayoutSignatureRef.current[lineIndex];
+    const measuredWordSignature =
+      wordLayoutSignatureRef.current[lineIndex]?.[wordIndex];
+    if (measuredLineSignature !== currentLine) return NaN;
+    if (measuredWordSignature !== currentWord) return NaN;
+    const measuredY = lineOffsetsRef.current[lineIndex];
+    const measuredWordY = wordOffsetsRef.current[lineIndex]?.[wordIndex];
+    if (Number.isFinite(measuredY) && Number.isFinite(measuredWordY)) {
+      return measuredY + measuredWordY;
+    }
+    return NaN;
+  };
+  const recenterToExactWord = useCallback((lineIndex, wordIndex, attempt = 0) => {
+    const wordRef = wordRefsRef.current[lineIndex]?.[wordIndex];
+    const contentRef = scrollContentRef.current;
+    if (!scrollViewRef.current || lineIndex < 0 || wordIndex < 0) return;
+    if (
+      !wordRef ||
+      !contentRef ||
+      typeof wordRef.measureLayout !== "function"
+    ) {
+      if (attempt >= 12) return;
+      if (exactSearchRecenterTimerRef.current) {
+        clearTimeout(exactSearchRecenterTimerRef.current);
+      }
+      exactSearchRecenterTimerRef.current = setTimeout(() => {
+        recenterToExactWord(lineIndex, wordIndex, attempt + 1);
+      }, 45);
+      return;
+    }
+    wordRef.measureLayout(
+      contentRef,
+      (_x, y, _width, height) => {
+        if (exactSearchRecenterTimerRef.current) {
+          clearTimeout(exactSearchRecenterTimerRef.current);
+          exactSearchRecenterTimerRef.current = null;
+        }
+        const viewportHeight = scrollViewportHeightRef.current || 0;
+        const anchorY = y + (Number(height) > 0 ? height * 0.5 : lineHeightPx * 0.5);
+        const targetY =
+          viewportHeight > 0
+            ? Math.max(0, anchorY - viewportHeight * 0.5)
+            : Math.max(0, anchorY);
+        scrollViewRef.current?.scrollTo({ y: targetY, animated: false });
+        scrollYRef.current = targetY;
+      },
+      () => {
+        if (attempt >= 12) return;
+        if (exactSearchRecenterTimerRef.current) {
+          clearTimeout(exactSearchRecenterTimerRef.current);
+        }
+        exactSearchRecenterTimerRef.current = setTimeout(() => {
+          recenterToExactWord(lineIndex, wordIndex, attempt + 1);
+        }, 45);
+      }
+    );
+  }, [lineHeightPx]);
 
   useEffect(() => {
     if (!scrollViewRef.current || currentLineIndex < 0) return;
@@ -702,18 +1058,19 @@ export default function ReaderScreen({ route, navigation }) {
       animated: false,
     });
     scrollYRef.current = targetY;
-  }, [currentLineIndex, currentWordIndex, isPlaying, isFullScreen, lineGap, lineHeightPx]);
+  }, [currentLineIndex, currentWordIndex, isPlaying, isFullScreen, lineGap, lineHeightPx]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!scrollViewRef.current) return;
     if (isUserDraggingRef.current) return;
     const lineIndex = currentLineIndexRef.current;
+    const wordIndex = currentWordIndexRef.current;
     if (lineIndex < 0) return;
     // Run only when layout mode changes, not on every highlight update.
     // Do not clear measured offsets here; clearing can permanently lose layout anchors
     // if React Native doesn't emit onLayout again for unchanged rows.
     const timer = setTimeout(() => {
-      const anchorY = getHighlightAnchorY(lineIndex, currentWordIndex);
+      const anchorY = getHighlightAnchorY(lineIndex, wordIndex);
       const estimatedY =
         Number.isFinite(anchorY) && anchorY >= 0
           ? anchorY
@@ -726,19 +1083,66 @@ export default function ReaderScreen({ route, navigation }) {
       scrollYRef.current = targetY;
     }, 80);
     return () => clearTimeout(timer);
-  }, [isFullScreen, lineGap, lineHeightPx]);
+  }, [isFullScreen, lineGap, lineHeightPx]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const recenterToCurrentHighlight = (animated = true) => {
-    const lineIndex = currentLineIndexRef.current;
+  const recenterToCurrentHighlight = (
+    animated = true,
+    lineIndexOverride = null,
+    wordIndexOverride = null,
+    attempt = 0,
+    options = {}
+  ) => {
+    const { strictMeasured = false, centerInView = false } = options;
+    const lineIndex =
+      Number.isInteger(lineIndexOverride) && lineIndexOverride >= 0
+        ? lineIndexOverride
+        : currentLineIndexRef.current;
+    const wordIndex =
+      Number.isInteger(wordIndexOverride) && wordIndexOverride >= 0
+        ? wordIndexOverride
+        : currentWordIndexRef.current;
     if (!scrollViewRef.current || lineIndex < 0) return;
-    const y = getHighlightAnchorY(lineIndex, currentWordIndex);
-    if (!Number.isFinite(y)) return;
+    const measuredY = getMeasuredHighlightAnchorY(lineIndex, wordIndex);
+    const y = strictMeasured
+      ? measuredY
+      : Number.isFinite(measuredY)
+        ? measuredY
+        : getHighlightAnchorY(lineIndex, wordIndex);
+    if (!Number.isFinite(y)) {
+      if (attempt >= 12) return;
+      if (recenterRetryTimerRef.current) {
+        clearTimeout(recenterRetryTimerRef.current);
+      }
+      recenterRetryTimerRef.current = setTimeout(() => {
+        recenterToCurrentHighlight(
+          false,
+          lineIndex,
+          wordIndex,
+          attempt + 1,
+          options
+        );
+      }, 45);
+      return;
+    }
+    if (recenterRetryTimerRef.current) {
+      clearTimeout(recenterRetryTimerRef.current);
+      recenterRetryTimerRef.current = null;
+    }
     const viewportHeight = scrollViewportHeightRef.current || 0;
-    const baseOffset = isFullScreen ? 84 : 56;
-    const targetY = Math.max(0, y - Math.max(baseOffset, viewportHeight * 0.35));
+    let targetY = 0;
+    if (centerInView && viewportHeight > 0) {
+      targetY = Math.max(
+        0,
+        y - Math.max(8, viewportHeight * 0.5 - lineHeightPx * 0.5)
+      );
+    } else {
+      const baseOffset = isFullScreen ? 84 : 56;
+      targetY = Math.max(0, y - Math.max(baseOffset, viewportHeight * 0.35));
+    }
     scrollViewRef.current.scrollTo({ y: targetY, animated });
     scrollYRef.current = targetY;
   };
+  recenterToCurrentHighlightRef.current = recenterToCurrentHighlight;
 
   useEffect(() => {
     if (isFullScreen) {
@@ -748,27 +1152,119 @@ export default function ReaderScreen({ route, navigation }) {
     }
   }, [isFullScreen]);
 
-  const jumpToSegment = (segmentIndex, resumePlayback = false) => {
+  const jumpToSegment = (
+    segmentIndex,
+    resumePlayback = false,
+    statusMessage = "",
+    forceIfSame = false
+  ) => {
     const maxIndex = Math.max(0, segmentCountRef.current - 1);
     const clamped = Math.max(0, Math.min(maxIndex, segmentIndex));
-    if (clamped === currentSegmentIndexRef.current && !resumePlayback) return false;
+    if (clamped === currentSegmentIndexRef.current && !resumePlayback) {
+      if (!forceIfSame) return false;
+      // For in-segment search jumps, keep current scroll and let exact recenter handle positioning.
+      return true;
+    }
     if (resumePlayback) {
       resumeOnNextSegmentRef.current = true;
     }
-    setCurrentSegmentIndex(clamped);
+    const switchToken = Date.now();
+    segmentSwitchTokenRef.current = switchToken;
+    setIsSegmentLoading(true);
+    setSegmentStatusMessage(
+      statusMessage || `Loading part ${clamped + 1} of ${segmentCountRef.current}...`
+    );
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (segmentSwitchTokenRef.current !== switchToken) return;
+        setCurrentSegmentIndex(clamped);
+      });
+    });
     return true;
   };
 
-  const moveToNextSegment = (resumePlayback = false) => {
+  const moveToNextSegment = (resumePlayback = false, statusMessage = "") => {
     const next = currentSegmentIndexRef.current + 1;
     if (next >= segmentCountRef.current) return false;
-    return jumpToSegment(next, resumePlayback);
+    return jumpToSegment(next, resumePlayback, statusMessage);
   };
 
-  const moveToPrevSegment = () => {
+  const moveToPrevSegment = (statusMessage = "") => {
     const prev = currentSegmentIndexRef.current - 1;
     if (prev < 0) return false;
-    return jumpToSegment(prev, false);
+    return jumpToSegment(prev, false, statusMessage);
+  };
+  moveToNextSegmentRef.current = moveToNextSegment;
+
+  const stopPlaybackForManualPartSwitch = () => {
+    stopSpeech();
+    stopHighlighting();
+    setIsPlaying(false);
+    setIsPaused(false);
+  };
+
+  const navigateToSegmentManually = (
+    segmentIndex,
+    statusMessage = "",
+    forceIfSame = false
+  ) => {
+    const moved = jumpToSegment(segmentIndex, false, statusMessage, forceIfSame);
+    if (moved) {
+      stopPlaybackForManualPartSwitch();
+    }
+    return moved;
+  };
+
+  const commitManualPartInput = () => {
+    const trimmed = String(partInputValue || "").trim();
+    const parsed = Number.parseInt(trimmed, 10);
+    if (!Number.isFinite(parsed)) {
+      setPartInputValue(String(currentSegmentIndex + 1));
+      return;
+    }
+    const clamped = Math.min(Math.max(parsed, 1), segments.length);
+    setPartInputValue(String(clamped));
+    if (clamped - 1 !== currentSegmentIndex) {
+      navigateToSegmentManually(clamped - 1, `Opening part ${clamped}...`);
+    }
+  };
+
+  const jumpToSearchMatch = (cursorIndex) => {
+    if (
+      cursorIndex < 0 ||
+      cursorIndex >= partSearchMatches.length
+    ) {
+      return;
+    }
+    const targetPart = partSearchMatches[cursorIndex];
+    setPartSearchCursor(cursorIndex);
+    navigateToSegmentManually(
+      targetPart,
+      `Opening match ${cursorIndex + 1} of ${partSearchMatches.length}...`,
+      true
+    );
+  };
+
+  const goToNextSearchMatch = () => {
+    if (!partSearchMatches.length) return;
+    if (partSearchCursor < 0) {
+      jumpToSearchMatch(0);
+      return;
+    }
+    const next = (partSearchCursor + 1) % partSearchMatches.length;
+    jumpToSearchMatch(next);
+  };
+
+  const goToPrevSearchMatch = () => {
+    if (!partSearchMatches.length) return;
+    if (partSearchCursor < 0) {
+      jumpToSearchMatch(partSearchMatches.length - 1);
+      return;
+    }
+    const start = partSearchCursor;
+    const prev =
+      (start - 1 + partSearchMatches.length) % partSearchMatches.length;
+    jumpToSearchMatch(prev);
   };
 
   useEffect(() => {
@@ -792,7 +1288,7 @@ export default function ReaderScreen({ route, navigation }) {
       recenterToCurrentHighlight(false);
     }, 90);
     return () => clearTimeout(timer);
-  }, [safeText, lineWords.length, readingSpeed, useNativeTts, pitch]);
+  }, [safeText, lineWords.length, readingSpeed, useNativeTts, pitch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handlePlayPause = () => {
     if (isPlaying) {
@@ -834,6 +1330,57 @@ export default function ReaderScreen({ route, navigation }) {
       startHighlighting(lineIndex, safeWordIndex);
     }
   };
+  seekToPositionRef.current = seekToPosition;
+
+  useEffect(() => {
+    if (!normalizedPartSearchQuery) return;
+    if (partSearchCursor < 0) return;
+    if (currentMatchPart !== currentSegmentIndex) return;
+    let settleTimer = null;
+    const applyKey = `${normalizedPartSearchQuery}:${currentSegmentIndex}:${partSearchCursor}`;
+    if (appliedSearchFocusKeyRef.current === applyKey) return;
+    const matchPosition = findFirstWordMatchInCurrentSegment(
+      normalizedPartSearchQuery
+    );
+    appliedSearchFocusKeyRef.current = applyKey;
+    if (!matchPosition) return;
+    pendingSearchTargetRef.current = {
+      key: applyKey,
+      lineIndex: matchPosition.lineIndex,
+      wordIndex: matchPosition.wordIndex,
+    };
+    seekToPositionRef.current?.(matchPosition.lineIndex, matchPosition.wordIndex);
+    requestAnimationFrame(() => {
+      recenterToExactWord(matchPosition.lineIndex, matchPosition.wordIndex, 0);
+      recenterToCurrentHighlightRef.current?.(
+        false,
+        matchPosition.lineIndex,
+        matchPosition.wordIndex,
+        0,
+        { strictMeasured: true, centerInView: true }
+      );
+      settleTimer = setTimeout(() => {
+        recenterToExactWord(matchPosition.lineIndex, matchPosition.wordIndex, 0);
+        recenterToCurrentHighlightRef.current?.(
+          false,
+          matchPosition.lineIndex,
+          matchPosition.wordIndex,
+          0,
+          { strictMeasured: true, centerInView: true }
+        );
+      }, 120);
+    });
+    return () => {
+      if (settleTimer) clearTimeout(settleTimer);
+    };
+  }, [
+    normalizedPartSearchQuery,
+    partSearchCursor,
+    currentMatchPart,
+    currentSegmentIndex,
+    findFirstWordMatchInCurrentSegment,
+    recenterToExactWord,
+  ]);
 
   const buildSpeechMap = (startLine, startWord) => {
     const map = [];
@@ -859,12 +1406,17 @@ export default function ReaderScreen({ route, navigation }) {
 
   const handlePlay = () => {
     try {
-      if (!lines.length) return;
+      if (isSegmentLoading || !lines.length) return;
       const startLineIndex = currentLineIndex >= 0 ? currentLineIndex : 0;
       const startWordIndex = currentWordIndex >= 0 ? currentWordIndex : 0;
+      const speechPayload = buildSpeechMap(startLineIndex, startWordIndex);
+      if (!speechPayload.text || !speechPayload.text.trim()) {
+        setIsPlaying(false);
+        setIsPaused(false);
+        return;
+      }
       setIsPlaying(true);
       setIsPaused(false);
-      const speechPayload = buildSpeechMap(startLineIndex, startWordIndex);
       speechMapRef.current = speechPayload.map;
       speechMapIndexRef.current = 0;
       speakText(speechPayload.text, readingSpeed, useNativeTts, pitch);
@@ -897,51 +1449,97 @@ export default function ReaderScreen({ route, navigation }) {
   };
 
   const handleBackward = () => {
-    if (!lines.length) return;
-    if (currentLineIndex <= 0 && moveToPrevSegment()) {
-      setCurrentLineIndex(-1);
-      setCurrentWordIndex(-1);
-      if (isPlaying) {
-        stopSpeech();
-        stopHighlighting();
-        resumeOnNextSegmentRef.current = true;
+    if (!lines.length || !totalWordCount) return;
+    const wordsPerLineEstimate = Math.max(
+      3,
+      Math.min(12, Math.round(maxCharsPerLine / 7))
+    );
+    const stepWords = wordsPerLineEstimate;
+    const baseLine = currentLineIndex >= 0 ? currentLineIndex : 0;
+    const baseWord = currentWordIndex >= 0 ? currentWordIndex : 0;
+    const currentFlat = Math.max(
+      0,
+      Math.min(
+        totalWordCount - 1,
+        (lineWordStarts[baseLine] || 0) + baseWord
+      )
+    );
+    const targetFlat = Math.max(0, currentFlat - stepWords);
+
+    let targetLine = 0;
+    for (let i = lineWordStarts.length - 1; i >= 0; i -= 1) {
+      if (lineWordStarts[i] <= targetFlat) {
+        targetLine = i;
+        break;
       }
-      return;
     }
-    const newIndex = Math.max(0, currentLineIndex - 1);
-    setCurrentLineIndex(newIndex);
-    setCurrentWordIndex(-1);
-    if (isPlaying) {
-      stopSpeech();
-      const speechPayload = buildSpeechMap(newIndex, 0);
-      speechMapRef.current = speechPayload.map;
-      speechMapIndexRef.current = 0;
-      speakText(speechPayload.text, readingSpeed, useNativeTts, pitch);
-      if (!useNativeTts) {
-        startHighlighting(newIndex, 0);
-      }
+    const targetWord = Math.max(0, targetFlat - (lineWordStarts[targetLine] || 0));
+
+    setCurrentLineIndex(targetLine);
+    setCurrentWordIndex(targetWord);
+    if (!isPlaying) return;
+    stopSpeech();
+    const speechPayload = buildSpeechMap(targetLine, targetWord);
+    speechMapRef.current = speechPayload.map;
+    speechMapIndexRef.current = 0;
+    speakText(speechPayload.text, readingSpeed, useNativeTts, pitch);
+    if (!useNativeTts) {
+      startHighlighting(targetLine, targetWord);
     }
   };
 
   const handleForward = () => {
-    if (!lines.length) return;
-    if (currentLineIndex >= lines.length - 1 && moveToNextSegment(isPlaying)) {
-      setCurrentLineIndex(-1);
-      setCurrentWordIndex(-1);
+    if (!lines.length || !totalWordCount) return;
+    const wordsPerLineEstimate = Math.max(
+      3,
+      Math.min(12, Math.round(maxCharsPerLine / 7))
+    );
+    const stepWords = wordsPerLineEstimate;
+    const baseLine = currentLineIndex >= 0 ? currentLineIndex : 0;
+    const baseWord = currentWordIndex >= 0 ? currentWordIndex : 0;
+    const currentFlat = Math.max(
+      0,
+      Math.min(
+        totalWordCount - 1,
+        (lineWordStarts[baseLine] || 0) + baseWord
+      )
+    );
+    const forwardTarget = currentFlat + stepWords;
+    if (forwardTarget >= totalWordCount) {
+      if (
+        moveToNextSegment(isPlaying, "Loading next part...")
+      ) {
+        setCurrentLineIndex(-1);
+        setCurrentWordIndex(-1);
+        if (isPlaying) {
+          stopSpeech();
+          stopHighlighting();
+          resumeOnNextSegmentRef.current = true;
+        }
+      }
       return;
     }
-    const newIndex = Math.min(lines.length - 1, currentLineIndex + 1);
-    setCurrentLineIndex(newIndex);
-    setCurrentWordIndex(-1);
-    if (isPlaying) {
-      stopSpeech();
-      const speechPayload = buildSpeechMap(newIndex, 0);
-      speechMapRef.current = speechPayload.map;
-      speechMapIndexRef.current = 0;
-      speakText(speechPayload.text, readingSpeed, useNativeTts, pitch);
-      if (!useNativeTts) {
-        startHighlighting(newIndex, 0);
+
+    const targetFlat = Math.max(0, forwardTarget);
+    let targetLine = 0;
+    for (let i = lineWordStarts.length - 1; i >= 0; i -= 1) {
+      if (lineWordStarts[i] <= targetFlat) {
+        targetLine = i;
+        break;
       }
+    }
+    const targetWord = Math.max(0, targetFlat - (lineWordStarts[targetLine] || 0));
+
+    setCurrentLineIndex(targetLine);
+    setCurrentWordIndex(targetWord);
+    if (!isPlaying) return;
+    stopSpeech();
+    const speechPayload = buildSpeechMap(targetLine, targetWord);
+    speechMapRef.current = speechPayload.map;
+    speechMapIndexRef.current = 0;
+    speakText(speechPayload.text, readingSpeed, useNativeTts, pitch);
+    if (!useNativeTts) {
+      startHighlighting(targetLine, targetWord);
     }
   };
 
@@ -978,7 +1576,7 @@ export default function ReaderScreen({ route, navigation }) {
     const advanceWord = (lineIndex, wordIndex) => {
       if (lineIndex >= lineWords.length) {
         stopSpeech();
-        if (moveToNextSegment(true)) {
+        if (moveToNextSegment(true, "Loading next part...")) {
           return;
         }
         setIsPlaying(false);
@@ -1048,6 +1646,7 @@ export default function ReaderScreen({ route, navigation }) {
   useEffect(() => {
     if (!useNativeTts || !ttsEventEmitter) return undefined;
     const rangeSub = ttsEventEmitter.addListener("tts-range", ({ start }) => {
+      if (isVoicePreviewingRef.current || !isPlayingRef.current) return;
       const map = speechMapRef.current;
       let idx = speechMapIndexRef.current;
       while (idx < map.length && start >= map[idx].end) {
@@ -1062,12 +1661,13 @@ export default function ReaderScreen({ route, navigation }) {
       }
     });
     const doneSub = ttsEventEmitter.addListener("tts-done", () => {
+      if (isVoicePreviewingRef.current || !isPlayingRef.current) return;
       if (pendingHighlightTimerRef.current) {
         clearTimeout(pendingHighlightTimerRef.current);
         pendingHighlightTimerRef.current = null;
       }
       pendingHighlightRef.current = null;
-      if (moveToNextSegment(true)) {
+      if (moveToNextSegmentRef.current?.(true, "Loading next part...")) {
         return;
       }
       setIsPlaying(false);
@@ -1076,6 +1676,7 @@ export default function ReaderScreen({ route, navigation }) {
       setCurrentWordIndex(-1);
     });
     const errSub = ttsEventEmitter.addListener("tts-error", () => {
+      if (isVoicePreviewingRef.current || !isPlayingRef.current) return;
       if (pendingHighlightTimerRef.current) {
         clearTimeout(pendingHighlightTimerRef.current);
         pendingHighlightTimerRef.current = null;
@@ -1094,21 +1695,114 @@ export default function ReaderScreen({ route, navigation }) {
       doneSub.remove();
       errSub.remove();
     };
-  }, [useNativeTts, readingSpeed]);
+  }, [useNativeTts]);
+
+  const showTransientNotice = (message, durationMs = 1400) => {
+    setSaveNotice(message);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setSaveNotice(""), durationMs);
+  };
+
+  const handleStartEdit = () => {
+    if (isSegmentLoading || isSaving) return;
+    stopSpeech();
+    stopHighlighting();
+    setIsPlaying(false);
+    setIsPaused(false);
+    setShowSpeedPanel(false);
+    setShowQuickSettings(false);
+    setEditDraftText(safeText);
+    setIsEditMode(true);
+    requestAnimationFrame(() => {
+      editInputRef.current?.focus?.();
+    });
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditMode(false);
+    setEditDraftText("");
+  };
+
+  const handleApplyEdit = () => {
+    if (!isEditMode) return;
+    const nextSegmentText = String(editDraftText || "");
+    if (nextSegmentText === safeText) {
+      handleCancelEdit();
+      return;
+    }
+    const nextSegments = [...segments];
+    nextSegments[currentSegmentIndex] = nextSegmentText;
+    const rebuilt = nextSegments.join("\n\n").slice(0, MAX_TOTAL_CHARS);
+    setEditableFullText(rebuilt);
+    setIsEditMode(false);
+    setEditDraftText("");
+    showTransientNotice("Edits applied", 1200);
+  };
 
   const handleSave = async () => {
-    if (!fullText || !fullText.trim()) return;
+    if (!fullText || !fullText.trim() || isSaving) return;
+    const targetFolder = String(
+      showSaveNewFolderInput ? saveFolderInput : selectedSaveFolder
+    )
+      .trim();
+    const targetTitle = String(saveTitleInput || "").trim();
+    setShowSaveFolderPicker(false);
+    setShowSaveNewFolderInput(false);
+    setSaveFolderInput("");
+    setSaveTitleInput("");
+    setIsSaving(true);
+    setSaveNotice("Saving...");
+    try {
+      await addSavedText(fullText, targetTitle || undefined, {
+        folder: targetFolder || "",
+      });
+      setIsSaved(true);
+      setSaveNotice("Saved");
+    } catch (_error) {
+      setSaveNotice("Save failed");
+    } finally {
+      setIsSaving(false);
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = setTimeout(() => setSaveNotice(""), 1400);
+    }
+  };
+
+  const openSaveFolderPicker = async () => {
+    if (!fullText || !fullText.trim() || isSaving) return;
     if (isSaved) {
       setSaveNotice("Already saved");
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
       toastTimerRef.current = setTimeout(() => setSaveNotice(""), 1400);
       return;
     }
-    await addSavedText(fullText);
-    setIsSaved(true);
-    setSaveNotice("Saved");
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = setTimeout(() => setSaveNotice(""), 1400);
+
+    setSelectedSaveFolder("");
+    setShowSaveNewFolderInput(false);
+    setSaveFolderInput("");
+    setSaveTitleInput(
+      String(fullText || "")
+        .trim()
+        .split(/\s+/)
+        .slice(0, 6)
+        .join(" ")
+    );
+    setShowSaveFolderPicker(true);
+    setIsSaveFolderLoading(true);
+    try {
+      const saved = await getSavedTexts();
+      const uniqueFolders = [
+        ...new Set(
+          saved
+            .map((item) => String(item?.folder || "").trim())
+            .filter(Boolean)
+        ),
+      ].sort((a, b) => a.localeCompare(b));
+      setSaveFolderOptions(uniqueFolders);
+    } catch (_error) {
+      setSaveFolderOptions([]);
+    } finally {
+      setIsSaveFolderLoading(false);
+    }
   };
 
   return (
@@ -1152,32 +1846,83 @@ export default function ReaderScreen({ route, navigation }) {
               setBackgroundTheme(backgroundTheme === "dark" ? "light" : "dark")
             }
             accessibilityLabel="Toggle theme"
-          >
-            <MaterialIcons
-              name={backgroundTheme === "dark" ? "light-mode" : "dark-mode"}
-              size={17}
-              color={uiButtonIcon}
-            />
-          </TouchableOpacity>
+            >
+              <MaterialIcons
+                name={backgroundTheme === "dark" ? "light-mode" : "dark-mode"}
+                size={17}
+                color={uiButtonIcon}
+              />
+            </TouchableOpacity>
+          {isEditMode && (
+            <TouchableOpacity
+              style={[
+                styles.editButton,
+                {
+                  backgroundColor: uiButtonBg,
+                  borderColor: theme.border,
+                  borderWidth: 1,
+                },
+              ]}
+              onPress={handleCancelEdit}
+              accessibilityLabel="Cancel editing"
+            >
+              <MaterialIcons name="close" size={16} color={uiButtonIcon} />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             style={[
-              styles.saveButton,
+              styles.editButton,
+              (isSaving || isSegmentLoading) && styles.topButtonDisabled,
               {
                 backgroundColor: uiButtonBg,
                 borderColor: theme.border,
                 borderWidth: 1,
               },
             ]}
-            onPress={handleSave}
-            accessibilityLabel="Save text"
+            onPress={isEditMode ? handleApplyEdit : handleStartEdit}
+            accessibilityLabel={isEditMode ? "Apply edits" : "Edit text"}
+            disabled={isSaving || isSegmentLoading}
           >
             <MaterialIcons
-              name={isSaved ? "bookmark" : "bookmark-border"}
-              size={18}
+              name={isEditMode ? "check" : "edit"}
+              size={16}
               color={uiButtonIcon}
             />
             <Text style={[styles.saveText, { color: uiButtonIcon }]}>
-              {isSaved ? "Saved" : "Save"}
+              {isEditMode ? "Done" : "Edit"}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.saveButton,
+              (isSaving || isSegmentLoading || isEditMode) && styles.topButtonDisabled,
+              {
+                backgroundColor: uiButtonBg,
+                borderColor: theme.border,
+                borderWidth: 1,
+              },
+            ]}
+            onPress={() => {
+              if (isEditMode) {
+                showTransientNotice("Tap Done to apply edits first");
+                return;
+              }
+              openSaveFolderPicker();
+            }}
+            accessibilityLabel="Save text"
+            disabled={isSaving || isSegmentLoading || isEditMode}
+          >
+            {isSaving ? (
+              <ActivityIndicator size="small" color={uiButtonIcon} />
+            ) : (
+              <MaterialIcons
+                name={isSaved ? "bookmark" : "bookmark-border"}
+                size={18}
+                color={uiButtonIcon}
+              />
+            )}
+            <Text style={[styles.saveText, { color: uiButtonIcon }]}>
+              {isSaving ? "Saving..." : isSaved ? "Saved" : "Save"}
             </Text>
           </TouchableOpacity>
         </View>
@@ -1189,58 +1934,194 @@ export default function ReaderScreen({ route, navigation }) {
           </Text>
         </View>
       )}
-      {segments.length > 1 && (
+      {segments.length > 1 && !isEditMode && !isFullScreen && (
+        <View style={styles.inlinePartNavWrap}>
+          <View style={styles.inlineNavRow}>
+            <View style={styles.partHalfPart}>
+              <View
+                style={[
+                  styles.inlineInputShell,
+                  styles.partNavInputShell,
+                  {
+                    borderColor: theme.border,
+                    backgroundColor:
+                      isDarkBackground
+                        ? "rgba(255,255,255,0.06)"
+                        : "rgba(0,0,0,0.04)",
+                  },
+                ]}
+              >
+                <TouchableOpacity
+                  style={[styles.inlineArrowButton, styles.partNavArrowButton]}
+                  onPress={() => {
+                    blurInlineInputs();
+                    const moved = moveToPrevSegment("Loading previous part...");
+                    if (moved) stopPlaybackForManualPartSwitch();
+                  }}
+                  disabled={currentSegmentIndex <= 0 || isSegmentLoading}
+                  accessibilityLabel="Previous part"
+                >
+                  <MaterialIcons
+                    name="navigate-before"
+                    size={14}
+                    color={
+                      currentSegmentIndex <= 0 || isSegmentLoading
+                        ? theme.border
+                        : uiTextColor
+                    }
+                  />
+                </TouchableOpacity>
+                <View
+                  style={[
+                    styles.partCounterChip,
+                    styles.partCounterChipCompact,
+                    {
+                      borderColor: theme.border,
+                      backgroundColor:
+                        isDarkBackground
+                          ? "rgba(255,255,255,0.09)"
+                          : "rgba(255,255,255,0.92)",
+                    },
+                  ]}
+                >
+                  <TextInput
+                    ref={partInputRef}
+                    style={[
+                      styles.partInput,
+                      {
+                        color: uiTextColor,
+                      },
+                    ]}
+                    value={partInputValue}
+                    onChangeText={(value) => {
+                      const digitsOnly = String(value || "").replace(/[^0-9]/g, "");
+                      setPartInputValue(digitsOnly);
+                    }}
+                    onSubmitEditing={commitManualPartInput}
+                    onBlur={commitManualPartInput}
+                    keyboardType="number-pad"
+                    returnKeyType="done"
+                    maxLength={Math.max(2, String(segments.length).length)}
+                    selectTextOnFocus
+                  />
+                  <Text style={[styles.partCounterSlash, { color: uiTextColor }]}>/</Text>
+                  <Text style={[styles.partCounterTotal, { color: uiTextColor }]}>
+                    {segments.length}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.inlineArrowButton, styles.partNavArrowButton]}
+                  onPress={() => {
+                    blurInlineInputs();
+                    const moved = moveToNextSegment(false, "Loading next part...");
+                    if (moved) stopPlaybackForManualPartSwitch();
+                  }}
+                  disabled={currentSegmentIndex >= segments.length - 1 || isSegmentLoading}
+                  accessibilityLabel="Next part"
+                >
+                  <MaterialIcons
+                    name="navigate-next"
+                    size={14}
+                    color={
+                      currentSegmentIndex >= segments.length - 1 || isSegmentLoading
+                        ? theme.border
+                        : uiTextColor
+                    }
+                  />
+                </TouchableOpacity>
+              </View>
+            </View>
+            <View style={styles.partHalfSearch}>
+              <View
+                style={[
+                  styles.inlineInputShell,
+                  {
+                    borderColor: theme.border,
+                    backgroundColor:
+                      isDarkBackground
+                        ? "rgba(255,255,255,0.06)"
+                        : "rgba(0,0,0,0.04)",
+                  },
+                ]}
+              >
+                <TextInput
+                  ref={searchInputRef}
+                  style={[
+                    styles.partSearchInput,
+                    {
+                      color: uiTextColor,
+                    },
+                  ]}
+                  value={partSearchQuery}
+                  onChangeText={setPartSearchQuery}
+                  placeholder="Search"
+                  placeholderTextColor={isDarkBackground ? "#8F9499" : "#8A8A8A"}
+                  returnKeyType="search"
+                  onSubmitEditing={() => {
+                    if (partSearchCursor < 0) {
+                      jumpToSearchMatch(0);
+                    } else {
+                      goToNextSearchMatch();
+                    }
+                    blurInlineInputs();
+                  }}
+                />
+                <TouchableOpacity
+                  style={[
+                    styles.inlineArrowButton,
+                    !partSearchMatches.length && styles.segmentCenterButtonDisabled,
+                  ]}
+                  onPress={() => {
+                    blurInlineInputs();
+                    goToPrevSearchMatch();
+                  }}
+                  disabled={!partSearchMatches.length}
+                  accessibilityLabel="Previous search result"
+                >
+                  <MaterialIcons name="expand-less" size={16} color={uiTextColor} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.inlineArrowButton,
+                    !partSearchMatches.length && styles.segmentCenterButtonDisabled,
+                  ]}
+                  onPress={() => {
+                    blurInlineInputs();
+                    goToNextSearchMatch();
+                  }}
+                  disabled={!partSearchMatches.length}
+                  accessibilityLabel="Next search result"
+                >
+                  <MaterialIcons name="expand-more" size={16} color={uiTextColor} />
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+          {!!normalizedPartSearchQuery && (
+            <Text style={[styles.partSearchMeta, { color: uiTextColor }]}>
+              {partSearchMatches.length
+                ? partSearchCursor >= 0
+                  ? `Match ${partSearchCursor + 1} of ${partSearchMatches.length} - Part ${currentMatchPart + 1}`
+                  : `${partSearchMatches.length} match${partSearchMatches.length > 1 ? "es" : ""} found`
+                : "No matching parts found"}
+            </Text>
+          )}
+        </View>
+      )}
+      {isSegmentLoading && (
         <View
           style={[
-            styles.segmentBar,
+            styles.segmentLoadingBar,
             {
-              borderColor: theme.border,
-              backgroundColor:
-                theme.background === "#121212" ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.03)",
+              borderColor: statusBarBorder,
+              backgroundColor: statusBarBg,
             },
           ]}
         >
-          <TouchableOpacity
-            style={[styles.segmentArrow, { borderColor: theme.border }]}
-            onPress={() => {
-              const moved = moveToPrevSegment();
-              if (moved) {
-                stopSpeech();
-                stopHighlighting();
-                setIsPlaying(false);
-                setIsPaused(false);
-              }
-            }}
-            disabled={currentSegmentIndex <= 0}
-          >
-            <MaterialIcons
-              name="chevron-left"
-              size={16}
-              color={currentSegmentIndex <= 0 ? theme.border : uiTextColor}
-            />
-          </TouchableOpacity>
-          <Text style={[styles.segmentText, { color: uiTextColor }]}>
-            Part {currentSegmentIndex + 1} of {segments.length}
+          <ActivityIndicator size="small" color={statusBarAccent} />
+          <Text style={[styles.segmentLoadingText, { color: uiTextColor }]}>
+            {segmentStatusMessage || "Loading..."}
           </Text>
-          <TouchableOpacity
-            style={[styles.segmentArrow, { borderColor: theme.border }]}
-            onPress={() => {
-              const moved = moveToNextSegment(false);
-              if (moved) {
-                stopSpeech();
-                stopHighlighting();
-                setIsPlaying(false);
-                setIsPaused(false);
-              }
-            }}
-            disabled={currentSegmentIndex >= segments.length - 1}
-          >
-            <MaterialIcons
-              name="chevron-right"
-              size={16}
-              color={currentSegmentIndex >= segments.length - 1 ? theme.border : uiTextColor}
-            />
-          </TouchableOpacity>
         </View>
       )}
 
@@ -1250,6 +2131,11 @@ export default function ReaderScreen({ route, navigation }) {
           styles.textContainerWrapper,
           isFullScreen && styles.textContainerWrapperFull,
           !isFullScreen && styles.textContainerBox,
+          isEditMode &&
+            !isFullScreen &&
+            keyboardHeight > 0 && {
+              marginBottom: Math.max(12, keyboardHeight - insets.bottom + 8),
+            },
           {
             padding: textBoxPadding,
             backgroundColor: readingAreaBg,
@@ -1303,120 +2189,191 @@ export default function ReaderScreen({ route, navigation }) {
         >
           {styles.measureTextSample}
         </Text>
-        <ScrollView
-          ref={scrollViewRef}
-          style={styles.textScroll}
-          onContentSizeChange={(_, contentHeight) => {
-            scrollContentHeightRef.current = contentHeight || 0;
-          }}
-          onScroll={(event) => {
-            scrollYRef.current = event.nativeEvent.contentOffset.y || 0;
-          }}
-          scrollEventThrottle={16}
-          onScrollBeginDrag={() => {
-            isUserDraggingRef.current = true;
-            manualScrollHoldUntilRef.current = Date.now() + 350;
-          }}
-          onScrollEndDrag={() => {
-            isUserDraggingRef.current = false;
-            manualScrollHoldUntilRef.current = Date.now() + 180;
-          }}
-          onLayout={(event) => {
-            scrollViewportHeightRef.current = event.nativeEvent.layout.height;
-          }}
-          contentContainerStyle={[
-            styles.innerScrollContent,
-            isFullScreen && styles.innerScrollContentFull,
-          ]}
-          showsVerticalScrollIndicator={true}
-          scrollEnabled={true}
-        >
-          {lines.map((line, index) => {
-            if (line === "") {
-              return (
-                <View
-                  key={`spacer-${index}`}
-                  style={[styles.paragraphSpacer, { height: Math.max(18, lineGap + 12) }]}
-                />
-              );
-            }
+        {isEditMode ? (
+          <TextInput
+            ref={editInputRef}
+            style={[
+              styles.editTextInput,
+              {
+                color: readerTextColor,
+                fontFamily: resolvedFontFamily,
+                fontSize,
+                lineHeight: lineHeightPx,
+                letterSpacing: effectiveLetterSpacing,
+              },
+            ]}
+            multiline={true}
+            value={editDraftText}
+            onChangeText={setEditDraftText}
+            textAlignVertical="top"
+            selectionColor={uiTextColor}
+            autoCorrect={false}
+            autoCapitalize="sentences"
+            scrollEnabled={true}
+          />
+        ) : (
+          <ScrollView
+            ref={scrollViewRef}
+            style={styles.textScroll}
+            keyboardShouldPersistTaps="handled"
+            onTouchStart={blurInlineInputs}
+            onContentSizeChange={(_, contentHeight) => {
+              scrollContentHeightRef.current = contentHeight || 0;
+            }}
+            onScroll={(event) => {
+              scrollYRef.current = event.nativeEvent.contentOffset.y || 0;
+            }}
+            scrollEventThrottle={16}
+            onScrollBeginDrag={() => {
+              isUserDraggingRef.current = true;
+              manualScrollHoldUntilRef.current = Date.now() + 350;
+            }}
+            onScrollEndDrag={() => {
+              isUserDraggingRef.current = false;
+              manualScrollHoldUntilRef.current = Date.now() + 180;
+            }}
+            onLayout={(event) => {
+              scrollViewportHeightRef.current = event.nativeEvent.layout.height;
+            }}
+            contentContainerStyle={[
+              styles.innerScrollContent,
+              isFullScreen && styles.innerScrollContentFull,
+            ]}
+            showsVerticalScrollIndicator={true}
+            scrollEnabled={true}
+          >
+            <View ref={scrollContentRef}>
+              {lines.map((line, index) => {
+                if (line === "") {
+                  return (
+                    <View
+                      key={`spacer-${index}`}
+                      style={[styles.paragraphSpacer, { height: Math.max(18, lineGap + 12) }]}
+                    />
+                  );
+                }
 
-            const words = lineWords[index] || [];
-            const role = getLineRole(line);
-            const lineFontWeight = role === "heading" ? "700" : role === "list" ? "600" : "400";
-            const lineFontSize = role === "heading" ? fontSize + 1 : fontSize;
+                const words = lineWords[index] || [];
+                const role = getLineRole(line);
+                const lineFontWeight =
+                  role === "heading" ? "700" : role === "list" ? "600" : "400";
+                const lineFontSize = role === "heading" ? fontSize + 1 : fontSize;
 
-            return (
-              <View
-                key={index}
-                style={[
-                  styles.line,
-                  {
-                    backgroundColor:
-                      index === currentLineIndex ? lineHighlight : "transparent",
-                    paddingHorizontal: 4,
-                    paddingVertical: 2,
-                    borderRadius: 3,
-                    marginBottom: lineGap,
-                  },
-                ]}
-                onLayout={(event) => {
-                  lineOffsetsRef.current[index] = event.nativeEvent.layout.y;
-                  lineHeightsRef.current[index] = event.nativeEvent.layout.height;
-                  if (!wordOffsetsRef.current[index]) {
-                    wordOffsetsRef.current[index] = [];
-                  }
-                }}
-              >
-                {words.map((word, wordIndex) => (
-                  <Text
-                    key={`${index}-${wordIndex}`}
-                    onPress={() => seekToPosition(index, wordIndex)}
+                return (
+                  <View
+                    key={`line-${index}-${line}`}
+                    style={[
+                      styles.line,
+                      {
+                        backgroundColor:
+                          index === currentLineIndex ? lineHighlight : "transparent",
+                        paddingHorizontal: 4,
+                        paddingVertical: 2,
+                        borderRadius: 3,
+                        marginBottom: lineGap,
+                      },
+                    ]}
                     onLayout={(event) => {
-                      const wordY = event.nativeEvent.layout.y;
+                      const lineSignature = String(line || "");
+                      const prevLineSignature = lineLayoutSignatureRef.current[index];
+                      if (prevLineSignature !== lineSignature) {
+                        wordOffsetsRef.current[index] = [];
+                        wordLayoutSignatureRef.current[index] = [];
+                      }
+                      lineLayoutSignatureRef.current[index] = lineSignature;
+                      lineOffsetsRef.current[index] = event.nativeEvent.layout.y;
+                      lineHeightsRef.current[index] = event.nativeEvent.layout.height;
                       if (!wordOffsetsRef.current[index]) {
                         wordOffsetsRef.current[index] = [];
                       }
-                      wordOffsetsRef.current[index][wordIndex] = wordY;
-                    }}
-                    style={{
-                      fontFamily: resolvedFontFamily,
-                      fontSize: lineFontSize,
-                      lineHeight: lineHeightPx,
-                      fontWeight: lineFontWeight,
-                      letterSpacing: effectiveLetterSpacing,
-                      marginRight: wordIndex === words.length - 1 ? 0 : effectiveWordGap,
-                      flexShrink: 1,
-                      backgroundColor:
-                        index === currentLineIndex && wordIndex === currentWordIndex
-                          ? wordHighlight
-                          : "transparent",
-                      color:
-                        index === currentLineIndex && wordIndex === currentWordIndex
-                          ? wordTextColor
-                          : readerTextColor,
-                      borderRadius: 3,
-                      paddingHorizontal: 0,
+                      if (!wordLayoutSignatureRef.current[index]) {
+                        wordLayoutSignatureRef.current[index] = [];
+                      }
                     }}
                   >
-                    {word}
-                  </Text>
-                ))}
-              </View>
-            );
-          })}
-        </ScrollView>
+                    {words.map((word, wordIndex) => (
+                      <Text
+                        key={`${index}-${wordIndex}-${word}`}
+                        ref={(node) => {
+                          if (!wordRefsRef.current[index]) {
+                            wordRefsRef.current[index] = [];
+                          }
+                          wordRefsRef.current[index][wordIndex] = node;
+                        }}
+                        onPress={() => seekToPosition(index, wordIndex)}
+                        onLayout={(event) => {
+                          const wordY = event.nativeEvent.layout.y;
+                          if (!wordOffsetsRef.current[index]) {
+                            wordOffsetsRef.current[index] = [];
+                          }
+                          if (!wordLayoutSignatureRef.current[index]) {
+                            wordLayoutSignatureRef.current[index] = [];
+                          }
+                          wordOffsetsRef.current[index][wordIndex] = wordY;
+                          wordLayoutSignatureRef.current[index][wordIndex] = String(
+                            word || ""
+                          );
+                          const pending = pendingSearchTargetRef.current;
+                          if (
+                            pending &&
+                            pending.lineIndex === index &&
+                            pending.wordIndex === wordIndex
+                          ) {
+                            requestAnimationFrame(() => {
+                              recenterToExactWord(index, wordIndex, 0);
+                              recenterToCurrentHighlightRef.current?.(
+                                false,
+                                index,
+                                wordIndex,
+                                0,
+                                { strictMeasured: true, centerInView: true }
+                              );
+                            });
+                            pendingSearchTargetRef.current = null;
+                          }
+                        }}
+                        style={{
+                          fontFamily: resolvedFontFamily,
+                          fontSize: lineFontSize,
+                          lineHeight: lineHeightPx,
+                          fontWeight: lineFontWeight,
+                          letterSpacing: effectiveLetterSpacing,
+                          marginRight: wordIndex === words.length - 1 ? 0 : effectiveWordGap,
+                          flexShrink: 1,
+                          backgroundColor:
+                            index === currentLineIndex && wordIndex === currentWordIndex
+                              ? wordHighlight
+                              : isSearchWordMatch(word)
+                                ? searchMatchBg
+                                : "transparent",
+                          color:
+                            index === currentLineIndex && wordIndex === currentWordIndex
+                              ? wordTextColor
+                              : readerTextColor,
+                          borderRadius: 3,
+                          paddingHorizontal: 0,
+                        }}
+                      >
+                        {word}
+                      </Text>
+                    ))}
+                  </View>
+                );
+              })}
+            </View>
+          </ScrollView>
+        )}
       </View>
 
       {/* Controls */}
-      {!isFullScreen && (
+      {!isFullScreen && !isEditMode && (
         <>
         {showSpeedPanel && (
           <View
             style={[
               styles.speedPanel,
               {
-                backgroundColor: theme.background === "#121212" ? "#222222" : theme.highlight,
+                backgroundColor: isDarkBackground ? "#222222" : theme.highlight,
                 borderColor: theme.border,
               },
             ]}
@@ -1490,6 +2447,7 @@ export default function ReaderScreen({ route, navigation }) {
           isSpeedPanelOpen={showSpeedPanel}
           theme={theme}
           textColor={uiTextColor}
+          controlsDisabled={isSegmentLoading}
         />
         </>
       )}
@@ -1520,7 +2478,7 @@ export default function ReaderScreen({ route, navigation }) {
               styles.quickSettingsPanel,
               {
                 backgroundColor:
-                  theme.background === "#121212" ? "#1C1C1C" : theme.highlight,
+                  isDarkBackground ? "#1C1C1C" : theme.highlight,
                 borderColor: theme.border,
               },
             ]}
@@ -2168,7 +3126,7 @@ export default function ReaderScreen({ route, navigation }) {
                           0,
                           Math.max(0, shadeBoxSize.height - 16)
                         ),
-                        borderColor: theme.background === "#121212" ? "#FFFFFF" : "#1F1F1F",
+                        borderColor: isDarkBackground ? "#FFFFFF" : "#1F1F1F",
                       },
                     ]}
                     pointerEvents="none"
@@ -2215,6 +3173,237 @@ export default function ReaderScreen({ route, navigation }) {
           </View>
         </View>
       </Modal>
+      <Modal
+        visible={showSaveFolderPicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setShowSaveFolderPicker(false);
+          setShowSaveNewFolderInput(false);
+          setSaveFolderInput("");
+          setSaveTitleInput("");
+        }}
+      >
+        <View style={styles.partNavigatorOverlay}>
+          <Pressable
+            style={styles.partNavigatorBackdrop}
+            onPress={() => {
+              setShowSaveFolderPicker(false);
+              setShowSaveNewFolderInput(false);
+              setSaveFolderInput("");
+              setSaveTitleInput("");
+            }}
+          />
+          <View
+            style={[
+              styles.partNavigatorPanel,
+              {
+                borderColor: theme.border,
+                backgroundColor:
+                  isDarkBackground ? "#1C1C1C" : theme.highlight,
+              },
+            ]}
+          >
+            <View style={styles.partNavigatorHeader}>
+              <Text style={[styles.partNavigatorTitle, { color: uiTextColor }]}>
+                Save To Folder
+              </Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowSaveFolderPicker(false);
+                  setShowSaveNewFolderInput(false);
+                  setSaveFolderInput("");
+                  setSaveTitleInput("");
+                }}
+              >
+                <MaterialIcons name="close" size={20} color={uiTextColor} />
+              </TouchableOpacity>
+            </View>
+            <Text style={[styles.partNavigatorSubtitle, { color: uiTextColor }]}>
+              Choose a folder, or save to root.
+            </Text>
+
+            <TextInput
+              style={[
+                styles.saveFolderInput,
+                {
+                  color: uiTextColor,
+                  borderColor: theme.border,
+                  backgroundColor:
+                    isDarkBackground
+                      ? "rgba(255,255,255,0.06)"
+                      : "rgba(0,0,0,0.04)",
+                },
+              ]}
+              value={saveTitleInput}
+              onChangeText={setSaveTitleInput}
+              placeholder="File name"
+              placeholderTextColor={isDarkBackground ? "#8F9499" : "#8A8A8A"}
+              editable={!isSaving}
+            />
+
+            <View style={styles.saveFolderTopActions}>
+              <TouchableOpacity
+                style={[
+                  styles.saveFolderNewBtn,
+                  {
+                    borderColor: theme.border,
+                    backgroundColor:
+                      isDarkBackground
+                        ? "rgba(255,255,255,0.06)"
+                        : "rgba(0,0,0,0.04)",
+                  },
+                ]}
+                onPress={() => {
+                  setShowSaveNewFolderInput((prev) => {
+                    const next = !prev;
+                    if (next) {
+                      setSelectedSaveFolder("");
+                      setSaveFolderInput("");
+                    }
+                    return next;
+                  });
+                }}
+                disabled={isSaving}
+              >
+                <MaterialIcons name="create-new-folder" size={16} color={uiTextColor} />
+                <Text style={[styles.saveFolderNewBtnText, { color: uiTextColor }]}>
+                  {showSaveNewFolderInput ? "Close" : "New Folder"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {showSaveNewFolderInput && (
+              <TextInput
+                style={[
+                  styles.saveFolderInput,
+                  {
+                    color: uiTextColor,
+                    borderColor: theme.border,
+                    backgroundColor:
+                      isDarkBackground
+                        ? "rgba(255,255,255,0.06)"
+                        : "rgba(0,0,0,0.04)",
+                  },
+                ]}
+                value={saveFolderInput}
+                onChangeText={(value) => {
+                  setSaveFolderInput(value);
+                  setSelectedSaveFolder("");
+                }}
+                placeholder="Enter folder name"
+                placeholderTextColor={isDarkBackground ? "#8F9499" : "#8A8A8A"}
+                editable={!isSaving}
+              />
+            )}
+
+            {isSaveFolderLoading ? (
+              <View style={styles.saveFolderLoadingRow}>
+                <ActivityIndicator size="small" color={uiTextColor} />
+                <Text style={[styles.saveFolderLoadingText, { color: uiTextColor }]}>
+                  Loading folders...
+                </Text>
+              </View>
+            ) : (
+              <ScrollView
+                style={styles.saveFolderList}
+                contentContainerStyle={styles.saveFolderListWrap}
+                keyboardShouldPersistTaps="handled"
+              >
+                <TouchableOpacity
+                  style={[
+                    styles.saveFolderListItem,
+                    {
+                      borderColor:
+                        selectedSaveFolder === "" ? uiTextColor : theme.border,
+                      backgroundColor:
+                        selectedSaveFolder === ""
+                          ? isDarkBackground
+                            ? "rgba(255,255,255,0.14)"
+                            : "rgba(0,0,0,0.08)"
+                          : "transparent",
+                    },
+                  ]}
+                  onPress={() => {
+                    setSelectedSaveFolder("");
+                    setShowSaveNewFolderInput(false);
+                  }}
+                >
+                  <View style={styles.saveFolderListLeft}>
+                    <MaterialIcons name="home" size={16} color={uiTextColor} />
+                    <Text style={[styles.saveFolderListName, { color: uiTextColor }]}>
+                      Root
+                    </Text>
+                  </View>
+                  {selectedSaveFolder === "" && (
+                    <MaterialIcons name="check" size={18} color={uiTextColor} />
+                  )}
+                </TouchableOpacity>
+
+                {saveFolderOptions.map((folderName) => (
+                  <TouchableOpacity
+                    key={folderName}
+                    style={[
+                      styles.saveFolderListItem,
+                      {
+                        borderColor:
+                          selectedSaveFolder === folderName
+                            ? uiTextColor
+                            : theme.border,
+                        backgroundColor:
+                          selectedSaveFolder === folderName
+                            ? isDarkBackground
+                              ? "rgba(255,255,255,0.14)"
+                              : "rgba(0,0,0,0.08)"
+                            : "transparent",
+                      },
+                    ]}
+                    onPress={() => {
+                      setSelectedSaveFolder(folderName);
+                      setShowSaveNewFolderInput(false);
+                    }}
+                  >
+                    <View style={styles.saveFolderListLeft}>
+                      <MaterialIcons name="folder" size={16} color={uiTextColor} />
+                      <Text
+                        style={[styles.saveFolderListName, { color: uiTextColor }]}
+                        numberOfLines={1}
+                      >
+                        {folderName}
+                      </Text>
+                    </View>
+                    {selectedSaveFolder === folderName && (
+                      <MaterialIcons name="check" size={18} color={uiTextColor} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+
+            <TouchableOpacity
+              style={[
+                styles.saveFolderConfirmButton,
+                {
+                  borderColor: uiTextColor,
+                  backgroundColor: uiTextColor,
+                },
+              ]}
+              onPress={handleSave}
+              disabled={isSaving}
+            >
+              <Text
+                style={[
+                  styles.saveFolderConfirmText,
+                  { color: theme.background },
+                ]}
+              >
+                Save
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+      
     </SafeAreaView>
   );
 }
@@ -2242,6 +3431,13 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0,
   },
+  editTextInput: {
+    flex: 1,
+    minHeight: 0,
+    width: "100%",
+    paddingTop: 4,
+    paddingBottom: 120,
+  },
   topActions: {
     flexDirection: "row",
     alignItems: "center",
@@ -2252,9 +3448,9 @@ const styles = StyleSheet.create({
   },
   backButton: {
     position: "absolute",
-    left: 16,
-    width: 32,
-    height: 32,
+    left: 12,
+    width: 30,
+    height: 30,
     borderRadius: 7,
     alignItems: "center",
     justifyContent: "center",
@@ -2271,8 +3467,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 4,
     backgroundColor: "#1F1F1F",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 7,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.16,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  editButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#1F1F1F",
+    paddingHorizontal: 8,
+    paddingVertical: 5,
     borderRadius: 7,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
@@ -2284,6 +3494,9 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 11,
     fontWeight: "600",
+  },
+  topButtonDisabled: {
+    opacity: 0.62,
   },
   saveNotice: {
     marginLeft: 12,
@@ -2304,34 +3517,262 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
   },
-  segmentBar: {
-    marginTop: 6,
+  segmentCenterButtonDisabled: {
+    opacity: 0.6,
+  },
+  segmentLoadingBar: {
     marginHorizontal: 12,
     marginBottom: 6,
     borderWidth: 1,
     borderRadius: 10,
-    paddingHorizontal: 8,
+    paddingHorizontal: 10,
     paddingVertical: 6,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     gap: 8,
   },
-  segmentArrow: {
-    width: 28,
-    height: 28,
+  segmentLoadingText: {
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  partNavigatorOverlay: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    backgroundColor: "rgba(0,0,0,0.28)",
+  },
+  partNavigatorBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  partNavigatorPanel: {
+    width: "100%",
+    maxWidth: 380,
     borderWidth: 1,
-    borderRadius: 7,
+    borderRadius: 14,
+    padding: 14,
+    gap: 10,
+    maxHeight: "78%",
+  },
+  partNavigatorHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  partNavigatorTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  partNavigatorSubtitle: {
+    fontSize: 12,
+    fontWeight: "600",
+    opacity: 0.82,
+  },
+  partNavigatorScroll: {
+    flexGrow: 0,
+  },
+  partNavigatorScrollContent: {
+    gap: 10,
+    paddingBottom: 4,
+  },
+  inlinePartNavWrap: {
+    marginHorizontal: 12,
+    marginTop: 6,
+    marginBottom: 0,
+    paddingHorizontal: 0,
+    paddingVertical: 2,
+    gap: 4,
+  },
+  inlineNavRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    width: "100%",
+  },
+  inlineInputShell: {
+    borderWidth: 1,
+    borderRadius: 8,
+    minHeight: 32,
+    width: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 4,
+    overflow: "hidden",
+    justifyContent: "space-between",
+    gap: 4,
+  },
+  inlineArrowButton: {
+    width: 22,
+    height: 22,
     alignItems: "center",
     justifyContent: "center",
+    borderRadius: 5,
+    flexShrink: 0,
   },
-  segmentText: {
+  partNavInputShell: {
+    paddingHorizontal: 2,
+    gap: 2,
+  },
+  partNavArrowButton: {
+    width: 16,
+    height: 16,
+    borderRadius: 4,
+  },
+  partCounterChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 5,
+    minHeight: 24,
+    marginHorizontal: 0,
+    minWidth: 52,
+    flexShrink: 0,
+  },
+  partCounterChipCompact: {
+    minWidth: 0,
+    paddingHorizontal: 3,
+  },
+  partInput: {
+    minWidth: 12,
+    maxWidth: 18,
+    borderWidth: 0,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    textAlign: "right",
+    fontSize: 11,
+    fontWeight: "700",
+    includeFontPadding: false,
+    lineHeight: 16,
+  },
+  partCounterSlash: {
+    fontSize: 11,
+    fontWeight: "700",
+    lineHeight: 16,
+    includeFontPadding: false,
+    marginHorizontal: 1,
+  },
+  partCounterTotal: {
+    fontSize: 11,
+    fontWeight: "700",
+    lineHeight: 16,
+    includeFontPadding: false,
+  },
+  inlinePartOfText: {
+    fontSize: 12,
+    fontWeight: "700",
+    opacity: 0.82,
+    includeFontPadding: false,
+    marginRight: 0,
+    marginLeft: 0,
+    lineHeight: 16,
+  },
+  partHalfPart: {
+    flexBasis: "30%",
+    maxWidth: "30%",
+    minWidth: 0,
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+  partHalfSearch: {
+    flexBasis: "70%",
+    maxWidth: "70%",
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  partSearchInput: {
+    flex: 1,
+    minWidth: 0,
+    borderWidth: 0,
+    paddingHorizontal: 4,
+    paddingVertical: 0,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  partSearchMeta: {
+    fontSize: 10,
+    fontWeight: "600",
+    opacity: 0.85,
+    marginTop: 2,
+  },
+  saveFolderLoadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 4,
+  },
+  saveFolderLoadingText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  saveFolderTopActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+  },
+  saveFolderNewBtn: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  saveFolderNewBtnText: {
     fontSize: 12,
     fontWeight: "700",
   },
+  saveFolderInput: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  saveFolderList: {
+    maxHeight: 220,
+  },
+  saveFolderListWrap: {
+    gap: 8,
+  },
+  saveFolderListItem: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  saveFolderListLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flex: 1,
+    minWidth: 0,
+  },
+  saveFolderListName: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  saveFolderConfirmButton: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 4,
+  },
+  saveFolderConfirmText: {
+    fontSize: 14,
+    fontWeight: "800",
+  },
   themeButton: {
-    width: 32,
-    height: 32,
+    width: 30,
+    height: 30,
     borderRadius: 7,
     alignItems: "center",
     justifyContent: "center",
@@ -2675,7 +4116,7 @@ const styles = StyleSheet.create({
   textContainerWrapper: {
     flex: 1,
     marginHorizontal: 12,
-    marginTop: 14,
+    marginTop: 8,
     marginBottom: 12,
     overflow: "visible",
     minHeight: 0,
@@ -2737,5 +4178,7 @@ const styles = StyleSheet.create({
   },
   measureTextSample: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
 });
+
+
 
 

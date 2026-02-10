@@ -12,6 +12,7 @@ export default function ReaderControls({
   isSpeedPanelOpen,
   theme,
   textColor,
+  controlsDisabled = false,
 }) {
   const isDark = theme?.background === "#121212";
   const buttonBg = isDark ? "#2D2D2D" : theme?.highlight || "#ECEDEF";
@@ -32,9 +33,11 @@ export default function ReaderControls({
         <TouchableOpacity
           style={[
             styles.smallButton,
+            controlsDisabled && styles.disabledButton,
             { backgroundColor: buttonBg, borderColor: buttonBorder },
           ]}
           onPress={onBackward}
+          disabled={controlsDisabled}
           accessibilityLabel="Previous line"
         >
           <MaterialIcons name="replay-5" size={18} color={textColor} />
@@ -44,12 +47,14 @@ export default function ReaderControls({
           style={[
             styles.playButton,
             isPlaying && styles.playButtonActive,
+            controlsDisabled && styles.disabledButton,
             {
               backgroundColor: buttonBg,
               borderColor: buttonBorder,
             },
           ]}
           onPress={onPlayPause}
+          disabled={controlsDisabled}
           accessibilityLabel={isPlaying ? "Pause" : "Play"}
         >
           <MaterialIcons
@@ -62,9 +67,11 @@ export default function ReaderControls({
         <TouchableOpacity
           style={[
             styles.smallButton,
+            controlsDisabled && styles.disabledButton,
             { backgroundColor: buttonBg, borderColor: buttonBorder },
           ]}
           onPress={onForward}
+          disabled={controlsDisabled}
           accessibilityLabel="Next line"
         >
           <MaterialIcons name="forward-5" size={18} color={textColor} />
@@ -73,12 +80,14 @@ export default function ReaderControls({
         <TouchableOpacity
           style={[
             styles.speedButton,
+            controlsDisabled && styles.disabledButton,
             {
               borderColor: isSpeedPanelOpen ? (theme?.text || "#1F1F1F") : buttonBorder,
               backgroundColor: buttonBg,
             },
           ]}
           onPress={onOpenSpeed}
+          disabled={controlsDisabled}
           accessibilityLabel="Reading speed"
         >
           <MaterialIcons
@@ -99,9 +108,11 @@ export default function ReaderControls({
         <TouchableOpacity
           style={[
             styles.smallButton,
+            controlsDisabled && styles.disabledButton,
             { backgroundColor: buttonBg, borderColor: buttonBorder },
           ]}
           onPress={onOpenSettings}
+          disabled={controlsDisabled}
           accessibilityLabel="Reader settings"
         >
           <MaterialIcons name="tune" size={20} color={textColor} />
@@ -161,6 +172,9 @@ const styles = StyleSheet.create({
   },
   playButtonActive: {
     transform: [{ scale: 0.98 }],
+  },
+  disabledButton: {
+    opacity: 0.45,
   },
   speedButton: {
     minWidth: 84,

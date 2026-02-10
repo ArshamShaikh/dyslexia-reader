@@ -28,6 +28,7 @@ function analyzeFormatting(text) {
   const shortLines = nonEmptyLines.filter((line) => wordCount(line) > 0 && wordCount(line) <= 2).length;
   const numberedLines = nonEmptyLines.filter((line) => /^\s*\d+[\.\)]\s+/.test(line)).length;
   const bulletLines = nonEmptyLines.filter((line) => /^\s*[-*•]\s+/.test(line)).length;
+  const tableRows = nonEmptyLines.filter((line) => /\s\|\s/.test(line)).length;
   const headingLikeLines = nonEmptyLines.filter((line) => {
     const trimmed = line.trim();
     return trimmed.length <= 80 && /^[A-Z][A-Z0-9\s\-:&()/.]+$/.test(trimmed);
@@ -42,6 +43,7 @@ function analyzeFormatting(text) {
     paragraphBreaks,
     numberedLines,
     bulletLines,
+    tableRows,
     headingLikeLines,
     singleWordLineRatio: singleWordLines / nonEmptyCount,
     shortLineRatio: shortLines / nonEmptyCount,
@@ -101,6 +103,12 @@ function evaluateWithExpectations(cleanedText, metrics, expectations) {
   if (typeof expectations.minBulletLines === "number" && metrics.bulletLines < expectations.minBulletLines) {
     failures.push(
       `Expected at least ${expectations.minBulletLines} bullet lines, got ${metrics.bulletLines}.`
+    );
+  }
+
+  if (typeof expectations.minTableRows === "number" && metrics.tableRows < expectations.minTableRows) {
+    failures.push(
+      `Expected at least ${expectations.minTableRows} table rows, got ${metrics.tableRows}.`
     );
   }
 
@@ -210,6 +218,7 @@ async function main() {
       reportLines.push(`- Lines: ${metrics.lines} (non-empty: ${metrics.nonEmptyLines})`);
       reportLines.push(`- Numbered lines: ${metrics.numberedLines}`);
       reportLines.push(`- Bullet lines: ${metrics.bulletLines}`);
+      reportLines.push(`- Table rows: ${metrics.tableRows}`);
       reportLines.push(`- Paragraph breaks: ${metrics.paragraphBreaks}`);
       reportLines.push(`- Single-word line ratio: ${metrics.singleWordLineRatio.toFixed(2)}`);
       reportLines.push(`- Short-line ratio: ${metrics.shortLineRatio.toFixed(2)}`);

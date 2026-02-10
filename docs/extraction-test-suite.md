@@ -63,6 +63,7 @@ Supported keys:
   "minChars": 250,
   "minNumberedLines": 3,
   "minBulletLines": 2,
+  "minTableRows": 4,
   "maxSingleWordLineRatio": 0.15,
   "requiredContains": ["software engineering", "umbrella activities"],
   "requiredRegex": ["^1\\.\\s+Explain", "^Subject:\\s+"],

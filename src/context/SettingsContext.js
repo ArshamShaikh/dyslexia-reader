@@ -20,6 +20,8 @@ const LIMITS = {
 
 export const SettingsProvider = ({ children }) => {
   const [fontFamily, setFontFamily] = useState("Lexend");
+  const [uiFontFamily, setUiFontFamily] = useState("System");
+  const [applyUiFontEverywhere, setApplyUiFontEverywhere] = useState(false);
   const [fontSize, setFontSize] = useState(18);
   const [lineHeight, setLineHeight] = useState(1.5);
   const [wordSpacing, setWordSpacing] = useState(4);
@@ -144,6 +146,10 @@ export const SettingsProvider = ({ children }) => {
       if (!isMounted) return;
       if (stored) {
         if (stored.fontFamily) setFontFamily(stored.fontFamily);
+        if (stored.uiFontFamily) setUiFontFamily(stored.uiFontFamily);
+        if (typeof stored.applyUiFontEverywhere === "boolean") {
+          setApplyUiFontEverywhere(stored.applyUiFontEverywhere);
+        }
         if (stored.fontSize) setSafeFontSize(stored.fontSize);
         if (stored.lineHeight) setSafeLineHeight(stored.lineHeight);
         if (stored.wordSpacing !== undefined) setSafeWordSpacing(stored.wordSpacing);
@@ -196,7 +202,7 @@ export const SettingsProvider = ({ children }) => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!didLoadRef.current) return;
@@ -204,6 +210,8 @@ export const SettingsProvider = ({ children }) => {
     saveTimerRef.current = setTimeout(() => {
       saveSettings({
         fontFamily,
+        uiFontFamily,
+        applyUiFontEverywhere,
         fontSize,
         lineHeight,
         wordSpacing,
@@ -229,6 +237,8 @@ export const SettingsProvider = ({ children }) => {
     }, 200);
   }, [
     fontFamily,
+    uiFontFamily,
+    applyUiFontEverywhere,
     fontSize,
     lineHeight,
     wordSpacing,
@@ -251,6 +261,11 @@ export const SettingsProvider = ({ children }) => {
     readingAreaSaturation,
     readingAreaValue,
   ]);
+
+  useEffect(() => {
+    if (!applyUiFontEverywhere) return;
+    setFontFamily(uiFontFamily);
+  }, [applyUiFontEverywhere, uiFontFamily]);
 
   const hsvToHex = (h, s, v) => {
     const hue = ((Number(h) % 360) + 360) % 360;
@@ -282,6 +297,10 @@ export const SettingsProvider = ({ children }) => {
   const value = {
     fontFamily,
     setFontFamily,
+    uiFontFamily,
+    setUiFontFamily,
+    applyUiFontEverywhere,
+    setApplyUiFontEverywhere,
 
     fontSize,
     setFontSize: setSafeFontSize,
