@@ -1,3 +1,5 @@
+import { MaterialIcons } from "@expo/vector-icons";
+import Slider from "@react-native-community/slider";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -15,11 +17,12 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import Slider from "@react-native-community/slider";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { MaterialIcons } from "@expo/vector-icons";
+import WordOptionModal from "../components/WordOptionModal";
 import ReaderControls from "../components/ReaderControls";
 import { useSettings } from "../context/SettingsContext";
+import { getReaderSessionText } from "../services/readerSessionService";
+import { addSavedText, getSavedTexts, isTextSaved } from "../services/storageService";
 import {
   getNativeVoices,
   isNativeTtsAvailable,
@@ -28,11 +31,10 @@ import {
   stopSpeech,
   ttsEventEmitter,
 } from "../services/ttsService";
-import { splitIntoLines, splitIntoSegments } from "../utils/textParser";
 import { THEMES } from "../theme/colors";
 import { FONT_FAMILY_MAP } from "../theme/typography";
-import { addSavedText, getSavedTexts, isTextSaved } from "../services/storageService";
-import { getReaderSessionText } from "../services/readerSessionService";
+import { splitIntoLines, splitIntoSegments } from "../utils/textParser";
+
 
 
 export default function ReaderScreen({ route, navigation }) {
@@ -62,6 +64,8 @@ export default function ReaderScreen({ route, navigation }) {
   const [isEditMode, setIsEditMode] = useState(false);
   const [editDraftText, setEditDraftText] = useState("");
   const [saveNotice, setSaveNotice] = useState("");
+  const [selectedWord, setSelectedWord] = useState("");
+  const [isWordModalVisible, setIsWordModalVisible] = useState(false);
   const toastTimerRef = useRef(null);
   const [showQuickSettings, setShowQuickSettings] = useState(false);
   const [showSpeedPanel, setShowSpeedPanel] = useState(false);
@@ -276,6 +280,15 @@ export default function ReaderScreen({ route, navigation }) {
     [searchTokens]
   );
 
+  const handleLongPress = useCallback((word) => {
+    // Basic cleaning to get the raw word
+    const clean = word.replace(/[^a-zA-Z]/g, "");
+    if (clean.length > 1) {
+      setSelectedWord(clean);
+      setIsWordModalVisible(true);
+    }
+  }, []);
+
   const findFirstWordMatchInCurrentSegment = useCallback(
     (query) => {
       const tokens = String(query || "")
@@ -356,7 +369,7 @@ export default function ReaderScreen({ route, navigation }) {
     else if (hue < 180) [r, g, b] = [0, c, x];
     else if (hue < 240) [r, g, b] = [0, x, c];
     else if (hue < 300) [r, g, b] = [x, 0, c];
-    else [r, g, b] = [c, 0, x];
+    else[r, g, b] = [c, 0, x];
     const toHex = (v) =>
       Math.round((v + m) * 255)
         .toString(16)
@@ -1862,13 +1875,13 @@ export default function ReaderScreen({ route, navigation }) {
               setBackgroundTheme(backgroundTheme === "dark" ? "light" : "dark")
             }
             accessibilityLabel="Toggle theme"
-            >
-              <MaterialIcons
-                name={backgroundTheme === "dark" ? "light-mode" : "dark-mode"}
-                size={17}
-                color={uiButtonIcon}
-              />
-            </TouchableOpacity>
+          >
+            <MaterialIcons
+              name={backgroundTheme === "dark" ? "light-mode" : "dark-mode"}
+              size={17}
+              color={uiButtonIcon}
+            />
+          </TouchableOpacity>
           {isEditMode && (
             <TouchableOpacity
               style={[
@@ -2148,10 +2161,10 @@ export default function ReaderScreen({ route, navigation }) {
           isFullScreen && styles.textContainerWrapperFull,
           !isFullScreen && styles.textContainerBox,
           isEditMode &&
-            !isFullScreen &&
-            keyboardHeight > 0 && {
-              marginBottom: Math.max(12, keyboardHeight - insets.bottom + 8),
-            },
+          !isFullScreen &&
+          keyboardHeight > 0 && {
+            marginBottom: Math.max(12, keyboardHeight - insets.bottom + 8),
+          },
           {
             padding: textBoxPadding,
             backgroundColor: readingAreaBg,
@@ -2317,6 +2330,8 @@ export default function ReaderScreen({ route, navigation }) {
                           wordRefsRef.current[index][wordIndex] = node;
                         }}
                         onPress={() => seekToPosition(index, wordIndex)}
+                        onLongPress={() => handleLongPress(word)}
+                        delayLongPress={400}
                         onLayout={(event) => {
                           const wordY = event.nativeEvent.layout.y;
                           if (!wordOffsetsRef.current[index]) {
@@ -2384,114 +2399,94 @@ export default function ReaderScreen({ route, navigation }) {
       {/* Controls */}
       {!isFullScreen && !isEditMode && (
         <>
-        {showSpeedPanel && (
-          <View
-            style={[
-              styles.speedPanel,
-              {
-                backgroundColor: isDarkBackground ? "#222222" : theme.highlight,
-                borderColor: theme.border,
-              },
-            ]}
-          >
-            <View style={styles.speedPresetRow}>
-              {SPEED_PRESETS.map((preset) => {
-                const isActive = Math.abs(readingSpeed - preset) < 0.02;
-                return (
-                  <TouchableOpacity
-                    key={preset}
-                    style={[
-                      styles.speedPresetButton,
-                      { borderColor: theme.border },
-                      isActive && { backgroundColor: uiTextColor },
-                    ]}
-                    onPress={() => applySpeedChange(preset)}
-                  >
-                    <Text
+          {showSpeedPanel && (
+            <View
+              style={[
+                styles.speedPanel,
+                {
+                  backgroundColor: isDarkBackground ? "#222222" : theme.highlight,
+                  borderColor: theme.border,
+                },
+              ]}
+            >
+              <View style={styles.speedPresetRow}>
+                {SPEED_PRESETS.map((preset) => {
+                  const isActive = Math.abs(readingSpeed - preset) < 0.02;
+                  return (
+                    <TouchableOpacity
+                      key={preset}
                       style={[
-                        styles.speedPresetText,
-                        { color: isActive ? theme.background : uiTextColor },
+                        styles.speedPresetButton,
+                        { borderColor: theme.border },
+                        isActive && { backgroundColor: uiTextColor },
                       ]}
+                      onPress={() => applySpeedChange(preset)}
                     >
-                      {preset.toFixed(2)}x
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            <View style={styles.speedAdjustRow}>
-              <TouchableOpacity
-                style={[styles.quickStepButton, { borderColor: theme.border }]}
-                onPress={() =>
-                  applySpeedChange(
-                    stepAdjust(
-                      readingSpeed,
-                      speedStepForDirection(readingSpeed, -1),
-                      0.3,
-                      2.0,
-                      -1
+                      <Text
+                        style={[
+                          styles.speedPresetText,
+                          { color: isActive ? theme.background : uiTextColor },
+                        ]}
+                      >
+                        {preset.toFixed(2)}x
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <View style={styles.speedAdjustRow}>
+                <TouchableOpacity
+                  style={[styles.quickStepButton, { borderColor: theme.border }]}
+                  onPress={() =>
+                    applySpeedChange(
+                      stepAdjust(
+                        readingSpeed,
+                        speedStepForDirection(readingSpeed, -1),
+                        0.3,
+                        2.0,
+                        -1
+                      )
                     )
-                  )
-                }
-              >
-                <Text style={[styles.quickStepText, { color: uiTextColor }]}>-</Text>
-              </TouchableOpacity>
-              <Slider
-                style={styles.speedSlider}
-                minimumValue={0.3}
-                maximumValue={2.0}
-                step={0.05}
-                value={readingSpeed}
-                onValueChange={(value) => applySpeedChange(value)}
-                minimumTrackTintColor={uiTextColor}
-                maximumTrackTintColor={theme.border}
-                thumbTintColor={uiTextColor}
-              />
-              <TouchableOpacity
-                style={[styles.quickStepButton, { borderColor: theme.border }]}
-                onPress={() =>
-                  applySpeedChange(
-                    stepAdjust(
-                      readingSpeed,
-                      speedStepForDirection(readingSpeed, 1),
-                      0.3,
-                      2.0,
-                      1
+                  }
+                >
+                  <Text style={[styles.quickStepText, { color: uiTextColor }]}>-</Text>
+                </TouchableOpacity>
+                <Slider
+                  style={styles.speedSlider}
+                  minimumValue={0.3}
+                  maximumValue={2.0}
+                  step={0.05}
+                  value={readingSpeed}
+                  onValueChange={(value) => applySpeedChange(value)}
+                  minimumTrackTintColor={uiTextColor}
+                  maximumTrackTintColor={theme.border}
+                  thumbTintColor={uiTextColor}
+                />
+                <TouchableOpacity
+                  style={[styles.quickStepButton, { borderColor: theme.border }]}
+                  onPress={() =>
+                    applySpeedChange(
+                      stepAdjust(
+                        readingSpeed,
+                        speedStepForDirection(readingSpeed, 1),
+                        0.3,
+                        2.0,
+                        1
+                      )
                     )
-                  )
-                }
-              >
-                <Text style={[styles.quickStepText, { color: uiTextColor }]}>+</Text>
-              </TouchableOpacity>
+                  }
+                >
+                  <Text style={[styles.quickStepText, { color: uiTextColor }]}>+</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
-        )}
-        <ReaderControls
-          isPlaying={isPlaying}
-          onPlayPause={handlePlayPause}
-          onBackward={handleBackward}
-          onForward={handleForward}
-          onOpenSpeed={() => {
-            setShowQuickSettings(false);
-            setShowSpeedPanel((v) => !v);
-          }}
-          onOpenSettings={() => {
-            setShowSpeedPanel(false);
-            setShowQuickSettings(true);
-          }}
-          readingSpeed={readingSpeed}
-          isSpeedPanelOpen={showSpeedPanel}
-          theme={theme}
-          textColor={uiTextColor}
-          controlsDisabled={isSegmentLoading}
-        />
+          )}
         </>
       )}
-
       <Modal
         visible={showQuickSettings}
         transparent={true}
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() => {
           setShowQuickSettings(false);
           setSettingsTab("fonts");
@@ -2610,602 +2605,602 @@ export default function ReaderScreen({ route, navigation }) {
               showsVerticalScrollIndicator={true}
               scrollEnabled={!isColorDragging}
             >
-            {settingsTab === "fonts" && (
-              <View style={[styles.quickRow, styles.quickRowSpacing]}>
-                <Text style={[styles.quickLabel, { color: uiTextColor }]}>Font</Text>
-                <View style={styles.quickChipRow}>
-                  {["Lexend", "OpenDyslexic", "System"].map((font) => {
-                    const isActive = fontFamily === font;
-                    return (
-                      <TouchableOpacity
-                        key={font}
-                        style={[
-                          styles.quickChip,
-                          isActive && { backgroundColor: uiTextColor },
-                          { borderColor: theme.border },
-                        ]}
-                        onPress={() => setFontFamily(font)}
-                      >
-                        <Text
-                          style={[
-                            styles.quickChipText,
-                            {
-                              color: isActive ? theme.background : uiTextColor,
-                              fontFamily: FONT_FAMILY_MAP[font] || undefined,
-                            },
-                          ]}
-                        >
-                          {font}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-            )}
-
-            {settingsTab === "voice" && useNativeTts && (
-              <View style={[styles.quickRow, styles.quickRowSpacing]}>
-                <TouchableOpacity
-                  style={[
-                    styles.voiceSectionHeader,
-                    { borderColor: theme.border, backgroundColor: theme.highlight },
-                  ]}
-                  onPress={() => setShowVoiceSection((prev) => !prev)}
-                >
-                  <View style={styles.voiceHeaderLeft}>
-                    <Text style={[styles.quickLabel, { color: uiTextColor }]}>Voice</Text>
-                    <Text style={[styles.voiceCurrentText, { color: uiTextColor }]}>
-                      {ttsVoiceName
-                        ? allVoices.find((v) => v.name === ttsVoiceName)?.label || "Selected"
-                        : "Default"}
-                    </Text>
-                  </View>
-                  <MaterialIcons
-                    name={showVoiceSection ? "expand-less" : "expand-more"}
-                    size={18}
-                    color={uiTextColor}
-                  />
-                </TouchableOpacity>
-                {showVoiceSection && (
-                  <>
-                    <Text style={[styles.voiceSectionLabel, { color: uiTextColor }]}>
-                      Recommended
-                    </Text>
-                    <View style={styles.quickChipRow}>
-                      <View style={styles.voiceChoice}>
+              {settingsTab === "fonts" && (
+                <View style={[styles.quickRow, styles.quickRowSpacing]}>
+                  <Text style={[styles.quickLabel, { color: uiTextColor }]}>Font</Text>
+                  <View style={styles.quickChipRow}>
+                    {["Lexend", "OpenDyslexic", "System"].map((font) => {
+                      const isActive = fontFamily === font;
+                      return (
                         <TouchableOpacity
+                          key={font}
                           style={[
                             styles.quickChip,
-                            styles.voiceChip,
-                            !ttsVoiceName && { backgroundColor: uiTextColor },
+                            isActive && { backgroundColor: uiTextColor },
                             { borderColor: theme.border },
                           ]}
-                          onPress={() => setTtsVoiceName("")}
+                          onPress={() => setFontFamily(font)}
                         >
                           <Text
-                            numberOfLines={1}
                             style={[
                               styles.quickChipText,
-                              styles.voiceChipText,
-                              { color: !ttsVoiceName ? theme.background : uiTextColor },
+                              {
+                                color: isActive ? theme.background : uiTextColor,
+                                fontFamily: FONT_FAMILY_MAP[font] || undefined,
+                              },
                             ]}
                           >
-                            Default
+                            {font}
                           </Text>
                         </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
+
+              {settingsTab === "voice" && useNativeTts && (
+                <View style={[styles.quickRow, styles.quickRowSpacing]}>
+                  <TouchableOpacity
+                    style={[
+                      styles.voiceSectionHeader,
+                      { borderColor: theme.border, backgroundColor: theme.highlight },
+                    ]}
+                    onPress={() => setShowVoiceSection((prev) => !prev)}
+                  >
+                    <View style={styles.voiceHeaderLeft}>
+                      <Text style={[styles.quickLabel, { color: uiTextColor }]}>Voice</Text>
+                      <Text style={[styles.voiceCurrentText, { color: uiTextColor }]}>
+                        {ttsVoiceName
+                          ? allVoices.find((v) => v.name === ttsVoiceName)?.label || "Selected"
+                          : "Default"}
+                      </Text>
+                    </View>
+                    <MaterialIcons
+                      name={showVoiceSection ? "expand-less" : "expand-more"}
+                      size={18}
+                      color={uiTextColor}
+                    />
+                  </TouchableOpacity>
+                  {showVoiceSection && (
+                    <>
+                      <Text style={[styles.voiceSectionLabel, { color: uiTextColor }]}>
+                        Recommended
+                      </Text>
+                      <View style={styles.quickChipRow}>
+                        <View style={styles.voiceChoice}>
+                          <TouchableOpacity
+                            style={[
+                              styles.quickChip,
+                              styles.voiceChip,
+                              !ttsVoiceName && { backgroundColor: uiTextColor },
+                              { borderColor: theme.border },
+                            ]}
+                            onPress={() => setTtsVoiceName("")}
+                          >
+                            <Text
+                              numberOfLines={1}
+                              style={[
+                                styles.quickChipText,
+                                styles.voiceChipText,
+                                { color: !ttsVoiceName ? theme.background : uiTextColor },
+                              ]}
+                            >
+                              Default
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[
+                              styles.voicePreviewButton,
+                              { borderColor: theme.border },
+                              previewVoiceName === "default" && {
+                                backgroundColor: uiTextColor,
+                              },
+                            ]}
+                            onPress={() => previewVoice("")}
+                            accessibilityLabel="Preview default voice"
+                          >
+                            <MaterialIcons
+                              name="volume-up"
+                              size={14}
+                              color={
+                                previewVoiceName === "default"
+                                  ? theme.background
+                                  : uiTextColor
+                              }
+                            />
+                          </TouchableOpacity>
+                        </View>
+                        {recommendedVoices.map((voice) => {
+                          const voiceName = voice.name;
+                          const shortLabel = voice.label;
+                          const isActive = ttsVoiceName === voiceName;
+                          return (
+                            <View key={voiceName} style={styles.voiceChoice}>
+                              <TouchableOpacity
+                                style={[
+                                  styles.quickChip,
+                                  styles.voiceChip,
+                                  isActive && { backgroundColor: uiTextColor },
+                                  { borderColor: theme.border },
+                                ]}
+                                onPress={() => setTtsVoiceName(voiceName)}
+                              >
+                                <Text
+                                  numberOfLines={1}
+                                  style={[
+                                    styles.quickChipText,
+                                    styles.voiceChipText,
+                                    { color: isActive ? theme.background : uiTextColor },
+                                  ]}
+                                >
+                                  {shortLabel}
+                                </Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                style={[
+                                  styles.voicePreviewButton,
+                                  { borderColor: theme.border },
+                                  previewVoiceName === voiceName && {
+                                    backgroundColor: uiTextColor,
+                                  },
+                                ]}
+                                onPress={() => previewVoice(voiceName)}
+                                accessibilityLabel={`Preview ${shortLabel} voice`}
+                              >
+                                <MaterialIcons
+                                  name="volume-up"
+                                  size={14}
+                                  color={
+                                    previewVoiceName === voiceName
+                                      ? theme.background
+                                      : uiTextColor
+                                  }
+                                />
+                              </TouchableOpacity>
+                            </View>
+                          );
+                        })}
+                      </View>
+                      {allVoices.length > recommendedVoices.length && (
                         <TouchableOpacity
                           style={[
-                            styles.voicePreviewButton,
-                            { borderColor: theme.border },
-                            previewVoiceName === "default" && {
-                              backgroundColor: uiTextColor,
-                            },
+                            styles.voiceToggleButton,
+                            { borderColor: uiTextColor, backgroundColor: uiTextColor },
                           ]}
-                          onPress={() => previewVoice("")}
-                          accessibilityLabel="Preview default voice"
+                          onPress={() => setShowAllVoices((prev) => !prev)}
                         >
                           <MaterialIcons
-                            name="volume-up"
+                            name={showAllVoices ? "expand-less" : "expand-more"}
                             size={14}
-                            color={
-                              previewVoiceName === "default"
-                                ? theme.background
-                                : uiTextColor
-                            }
+                            color={theme.background}
                           />
+                          <Text style={[styles.voiceToggleText, { color: theme.background }]}>
+                            {showAllVoices
+                              ? "Hide full voice list"
+                              : `Show all voices (${allVoices.length})`}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                      {showAllVoices && extraVoices.length > 0 && (
+                        <>
+                          <Text style={[styles.voiceSectionLabel, { color: uiTextColor }]}>
+                            All voices
+                          </Text>
+                          <View style={styles.quickChipRow}>
+                            {extraVoices.map((voice) => {
+                              const voiceName = voice.name;
+                              const shortLabel = voice.label;
+                              const isActive = ttsVoiceName === voiceName;
+                              return (
+                                <View key={voiceName} style={styles.voiceChoice}>
+                                  <TouchableOpacity
+                                    style={[
+                                      styles.quickChip,
+                                      styles.voiceChip,
+                                      isActive && { backgroundColor: uiTextColor },
+                                      { borderColor: theme.border },
+                                    ]}
+                                    onPress={() => setTtsVoiceName(voiceName)}
+                                  >
+                                    <Text
+                                      numberOfLines={1}
+                                      style={[
+                                        styles.quickChipText,
+                                        styles.voiceChipText,
+                                        { color: isActive ? theme.background : uiTextColor },
+                                      ]}
+                                    >
+                                      {shortLabel}
+                                    </Text>
+                                  </TouchableOpacity>
+                                  <TouchableOpacity
+                                    style={[
+                                      styles.voicePreviewButton,
+                                      { borderColor: theme.border },
+                                      previewVoiceName === voiceName && {
+                                        backgroundColor: uiTextColor,
+                                      },
+                                    ]}
+                                    onPress={() => previewVoice(voiceName)}
+                                    accessibilityLabel={`Preview ${shortLabel} voice`}
+                                  >
+                                    <MaterialIcons
+                                      name="volume-up"
+                                      size={14}
+                                      color={
+                                        previewVoiceName === voiceName
+                                          ? theme.background
+                                          : uiTextColor
+                                      }
+                                    />
+                                  </TouchableOpacity>
+                                </View>
+                              );
+                            })}
+                          </View>
+                        </>
+                      )}
+                      <View
+                        style={[
+                          styles.quickHelpBox,
+                          {
+                            borderColor: theme.border,
+                            backgroundColor:
+                              theme.background === "#16171A"
+                                ? "rgba(255,255,255,0.05)"
+                                : "rgba(0,0,0,0.03)",
+                          },
+                        ]}
+                      >
+                        <Text style={[styles.quickHelpTitle, { color: uiTextColor }]}>
+                          How to add more voices
+                        </Text>
+                        <Text style={[styles.quickHelpText, { color: uiTextColor }]}>
+                          1. Open phone Settings.
+                        </Text>
+                        <Text style={[styles.quickHelpText, { color: uiTextColor }]}>
+                          2. Tap Text-to-speech output.
+                        </Text>
+                        <Text style={[styles.quickHelpText, { color: uiTextColor }]}>
+                          3. Download a new voice.
+                        </Text>
+                        <Text style={[styles.quickHelpText, { color: uiTextColor }]}>
+                          4. Come back and reopen this app.
+                        </Text>
+                        <TouchableOpacity
+                          style={[
+                            styles.voiceSettingsBtn,
+                            { borderColor: theme.border, backgroundColor: theme.highlight },
+                          ]}
+                          onPress={openVoiceSettings}
+                        >
+                          <MaterialIcons name="settings" size={14} color={uiTextColor} />
+                          <Text style={[styles.voiceSettingsBtnText, { color: uiTextColor }]}>
+                            Open voice settings
+                          </Text>
+                        </TouchableOpacity>
+                        {availableVoices.length <= 1 && (
+                          <Text style={[styles.quickHelpNote, { color: uiTextColor }]}>
+                            You currently have 1 voice on this phone.
+                          </Text>
+                        )}
+                      </View>
+                    </>
+                  )}
+                  <View style={styles.quickRow}>
+                    <View style={styles.quickRowHeader}>
+                      <Text style={[styles.quickLabel, { color: uiTextColor }]}>
+                        Pitch: {pitch.toFixed(2)}x
+                      </Text>
+                    </View>
+                    <View style={styles.quickSliderRow}>
+                      <Slider
+                        style={styles.quickSlider}
+                        minimumValue={0.5}
+                        maximumValue={2.0}
+                        step={0.05}
+                        value={pitch}
+                        onValueChange={(value) => applyPitchChange(value)}
+                        minimumTrackTintColor={uiTextColor}
+                        maximumTrackTintColor={theme.border}
+                        thumbTintColor={uiTextColor}
+                      />
+                      <View style={styles.quickStepperInline}>
+                        <TouchableOpacity
+                          style={styles.quickStepButton}
+                          onPress={() => applyPitchChange(stepAdjust(pitch, 0.05, 0.5, 2.0, -1))}
+                        >
+                          <Text style={[styles.quickStepText, { color: uiTextColor }]}>-</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.quickStepButton}
+                          onPress={() => applyPitchChange(stepAdjust(pitch, 0.05, 0.5, 2.0, 1))}
+                        >
+                          <Text style={[styles.quickStepText, { color: uiTextColor }]}>+</Text>
                         </TouchableOpacity>
                       </View>
-                      {recommendedVoices.map((voice) => {
-                        const voiceName = voice.name;
-                        const shortLabel = voice.label;
-                        const isActive = ttsVoiceName === voiceName;
-                        return (
-                          <View key={voiceName} style={styles.voiceChoice}>
+                    </View>
+                  </View>
+                </View>
+              )}
+
+                  {settingsTab === "fonts" && (
+                    <View style={styles.quickRow}>
+                      <View style={styles.quickRowHeader}>
+                        <Text style={[styles.quickLabel, { color: uiTextColor }]}>
+                          Font Size: {fontSize.toFixed(0)}
+                        </Text>
+                      </View>
+                      <View style={styles.quickSliderRow}>
+                        <Slider
+                          style={styles.quickSlider}
+                          minimumValue={14}
+                          maximumValue={26}
+                          step={1}
+                          value={fontSize}
+                          onValueChange={(value) => setFontSize(value)}
+                          minimumTrackTintColor={uiTextColor}
+                          maximumTrackTintColor={theme.border}
+                          thumbTintColor={uiTextColor}
+                        />
+                        <View style={styles.quickStepperInline}>
+                          <TouchableOpacity
+                            style={styles.quickStepButton}
+                            onPress={() => setFontSize((v) => stepAdjust(v, 1, 14, 26, -1))}
+                          >
+                            <Text style={[styles.quickStepText, { color: uiTextColor }]}>-</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.quickStepButton}
+                            onPress={() => setFontSize((v) => stepAdjust(v, 1, 14, 26, 1))}
+                          >
+                            <Text style={[styles.quickStepText, { color: uiTextColor }]}>+</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </View>
+                  )}
+
+                  {settingsTab === "spacing" && (
+                    <View style={styles.quickRow}>
+                      <View style={styles.quickRowHeader}>
+                        <Text style={[styles.quickLabel, { color: uiTextColor }]}>
+                          Line Spacing: {lineHeight.toFixed(2)}
+                        </Text>
+                      </View>
+                      <View style={styles.quickSliderRow}>
+                        <Slider
+                          style={styles.quickSlider}
+                          minimumValue={1.1}
+                          maximumValue={2.6}
+                          step={0.05}
+                          value={lineHeight}
+                          onValueChange={(value) => setLineHeight(Number(value.toFixed(2)))}
+                          minimumTrackTintColor={uiTextColor}
+                          maximumTrackTintColor={theme.border}
+                          thumbTintColor={uiTextColor}
+                        />
+                        <View style={styles.quickStepperInline}>
+                          <TouchableOpacity
+                            style={styles.quickStepButton}
+                            onPress={() =>
+                              setLineHeight((v) => stepAdjust(v, 0.05, 1.1, 2.6, -1))
+                            }
+                          >
+                            <Text style={[styles.quickStepText, { color: uiTextColor }]}>-</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.quickStepButton}
+                            onPress={() =>
+                              setLineHeight((v) => stepAdjust(v, 0.05, 1.1, 2.6, 1))
+                            }
+                          >
+                            <Text style={[styles.quickStepText, { color: uiTextColor }]}>+</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </View>
+                  )}
+
+                  {settingsTab === "spacing" && (
+                    <View style={styles.quickRow}>
+                      <View style={styles.quickRowHeader}>
+                        <Text style={[styles.quickLabel, { color: uiTextColor }]}>
+                          Word Spacing: {wordSpacing.toFixed(0)}pt
+                        </Text>
+                      </View>
+                      <View style={styles.quickSliderRow}>
+                        <Slider
+                          style={styles.quickSlider}
+                          minimumValue={0}
+                          maximumValue={12}
+                          step={1}
+                          value={wordSpacing}
+                          onValueChange={(value) => setWordSpacing(value)}
+                          minimumTrackTintColor={uiTextColor}
+                          maximumTrackTintColor={theme.border}
+                          thumbTintColor={uiTextColor}
+                        />
+                        <View style={styles.quickStepperInline}>
+                          <TouchableOpacity
+                            style={styles.quickStepButton}
+                            onPress={() => setWordSpacing((v) => stepAdjust(v, 1, 0, 12, -1))}
+                          >
+                            <Text style={[styles.quickStepText, { color: uiTextColor }]}>-</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.quickStepButton}
+                            onPress={() => setWordSpacing((v) => stepAdjust(v, 1, 0, 12, 1))}
+                          >
+                            <Text style={[styles.quickStepText, { color: uiTextColor }]}>+</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </View>
+                  )}
+
+                  {settingsTab === "spacing" && (
+                    <View style={styles.quickRow}>
+                      <View style={styles.quickRowHeader}>
+                        <Text style={[styles.quickLabel, { color: uiTextColor }]}>
+                          Letter Spacing: {letterSpacing.toFixed(2)}
+                        </Text>
+                      </View>
+                      <View style={styles.quickSliderRow}>
+                        <Slider
+                          style={styles.quickSlider}
+                          minimumValue={0}
+                          maximumValue={1.2}
+                          step={0.05}
+                          value={letterSpacing}
+                          onValueChange={(value) => setLetterSpacing(Number(value.toFixed(2)))}
+                          minimumTrackTintColor={uiTextColor}
+                          maximumTrackTintColor={theme.border}
+                          thumbTintColor={uiTextColor}
+                        />
+                        <View style={styles.quickStepperInline}>
+                          <TouchableOpacity
+                            style={styles.quickStepButton}
+                            onPress={() =>
+                              setLetterSpacing((v) => stepAdjust(v, 0.05, 0, 1.2, -1))
+                            }
+                          >
+                            <Text style={[styles.quickStepText, { color: uiTextColor }]}>-</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.quickStepButton}
+                            onPress={() =>
+                              setLetterSpacing((v) => stepAdjust(v, 0.05, 0, 1.2, 1))
+                            }
+                          >
+                            <Text style={[styles.quickStepText, { color: uiTextColor }]}>+</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </View>
+                  )}
+
+                  {settingsTab === "colors" && (
+                    <View style={styles.quickRow}>
+                      <View
+                        style={[
+                          styles.colorTargetSegmented,
+                          { borderColor: theme.border, backgroundColor: "rgba(127,127,127,0.10)" },
+                        ]}
+                      >
+                        {[
+                          { key: "text", label: "Text" },
+                          { key: "highlight", label: "Highlight" },
+                          { key: "readingArea", label: "Background" },
+                        ].map((target, index, arr) => {
+                          const item = colorTargets[target.key];
+                          const active = activeColorTarget === target.key;
+                          const isLast = index === arr.length - 1;
+                          return (
                             <TouchableOpacity
+                              key={target.key}
                               style={[
-                                styles.quickChip,
-                                styles.voiceChip,
-                                isActive && { backgroundColor: uiTextColor },
-                                { borderColor: theme.border },
+                                styles.colorTargetButton,
+                                !isLast && { borderRightWidth: 1, borderRightColor: theme.border },
+                                active && { backgroundColor: uiTextColor },
                               ]}
-                              onPress={() => setTtsVoiceName(voiceName)}
+                              onPress={() => setActiveColorTarget(target.key)}
                             >
+                              <View style={[styles.colorPreviewSmall, { backgroundColor: item.preview }]} />
                               <Text
                                 numberOfLines={1}
                                 style={[
-                                  styles.quickChipText,
-                                  styles.voiceChipText,
-                                  { color: isActive ? theme.background : uiTextColor },
+                                  styles.colorTargetText,
+                                  { color: active ? theme.background : uiTextColor },
                                 ]}
                               >
-                                {shortLabel}
+                                {target.label}
                               </Text>
                             </TouchableOpacity>
-                            <TouchableOpacity
-                              style={[
-                                styles.voicePreviewButton,
-                                { borderColor: theme.border },
-                                previewVoiceName === voiceName && {
-                                  backgroundColor: uiTextColor,
-                                },
-                              ]}
-                              onPress={() => previewVoice(voiceName)}
-                              accessibilityLabel={`Preview ${shortLabel} voice`}
-                            >
-                              <MaterialIcons
-                                name="volume-up"
-                                size={14}
-                                color={
-                                  previewVoiceName === voiceName
-                                    ? theme.background
-                                    : uiTextColor
-                                }
-                              />
-                            </TouchableOpacity>
-                          </View>
-                        );
-                      })}
+                          );
+                        })}
+                      </View>
                     </View>
-                    {allVoices.length > recommendedVoices.length && (
-                      <TouchableOpacity
-                        style={[
-                          styles.voiceToggleButton,
-                          { borderColor: uiTextColor, backgroundColor: uiTextColor },
-                        ]}
-                        onPress={() => setShowAllVoices((prev) => !prev)}
-                      >
-                        <MaterialIcons
-                          name={showAllVoices ? "expand-less" : "expand-more"}
-                          size={14}
-                          color={theme.background}
-                        />
-                        <Text style={[styles.voiceToggleText, { color: theme.background }]}>
-                          {showAllVoices
-                            ? "Hide full voice list"
-                            : `Show all voices (${allVoices.length})`}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-                    {showAllVoices && extraVoices.length > 0 && (
-                      <>
-                        <Text style={[styles.voiceSectionLabel, { color: uiTextColor }]}>
-                          All voices
-                        </Text>
-                        <View style={styles.quickChipRow}>
-                          {extraVoices.map((voice) => {
-                            const voiceName = voice.name;
-                            const shortLabel = voice.label;
-                            const isActive = ttsVoiceName === voiceName;
-                            return (
-                              <View key={voiceName} style={styles.voiceChoice}>
-                                <TouchableOpacity
-                                  style={[
-                                    styles.quickChip,
-                                    styles.voiceChip,
-                                    isActive && { backgroundColor: uiTextColor },
-                                    { borderColor: theme.border },
-                                  ]}
-                                  onPress={() => setTtsVoiceName(voiceName)}
-                                >
-                                  <Text
-                                    numberOfLines={1}
-                                    style={[
-                                      styles.quickChipText,
-                                      styles.voiceChipText,
-                                      { color: isActive ? theme.background : uiTextColor },
-                                    ]}
-                                  >
-                                    {shortLabel}
-                                  </Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                  style={[
-                                    styles.voicePreviewButton,
-                                    { borderColor: theme.border },
-                                    previewVoiceName === voiceName && {
-                                      backgroundColor: uiTextColor,
-                                    },
-                                  ]}
-                                  onPress={() => previewVoice(voiceName)}
-                                  accessibilityLabel={`Preview ${shortLabel} voice`}
-                                >
-                                  <MaterialIcons
-                                    name="volume-up"
-                                    size={14}
-                                    color={
-                                      previewVoiceName === voiceName
-                                        ? theme.background
-                                        : uiTextColor
-                                    }
-                                  />
-                                </TouchableOpacity>
-                              </View>
-                            );
-                          })}
-                        </View>
-                      </>
-                    )}
-                    <View
-                      style={[
-                        styles.quickHelpBox,
-                        {
-                          borderColor: theme.border,
-                          backgroundColor:
-                            theme.background === "#16171A"
-                              ? "rgba(255,255,255,0.05)"
-                              : "rgba(0,0,0,0.03)",
-                        },
-                      ]}
-                    >
-                      <Text style={[styles.quickHelpTitle, { color: uiTextColor }]}>
-                        How to add more voices
-                      </Text>
-                      <Text style={[styles.quickHelpText, { color: uiTextColor }]}>
-                        1. Open phone Settings.
-                      </Text>
-                      <Text style={[styles.quickHelpText, { color: uiTextColor }]}>
-                        2. Tap Text-to-speech output.
-                      </Text>
-                      <Text style={[styles.quickHelpText, { color: uiTextColor }]}>
-                        3. Download a new voice.
-                      </Text>
-                      <Text style={[styles.quickHelpText, { color: uiTextColor }]}>
-                        4. Come back and reopen this app.
-                      </Text>
-                      <TouchableOpacity
-                        style={[
-                          styles.voiceSettingsBtn,
-                          { borderColor: theme.border, backgroundColor: theme.highlight },
-                        ]}
-                        onPress={openVoiceSettings}
-                      >
-                        <MaterialIcons name="settings" size={14} color={uiTextColor} />
-                        <Text style={[styles.voiceSettingsBtnText, { color: uiTextColor }]}>
-                          Open voice settings
-                        </Text>
-                      </TouchableOpacity>
-                      {availableVoices.length <= 1 && (
-                        <Text style={[styles.quickHelpNote, { color: uiTextColor }]}>
-                          You currently have 1 voice on this phone.
-                        </Text>
-                      )}
-                    </View>
-                  </>
-                )}
-                <View style={styles.quickRow}>
-                  <View style={styles.quickRowHeader}>
-                    <Text style={[styles.quickLabel, { color: uiTextColor }]}>
-                      Pitch: {pitch.toFixed(2)}x
-                    </Text>
-                  </View>
-                  <View style={styles.quickSliderRow}>
-                    <Slider
-                      style={styles.quickSlider}
-                      minimumValue={0.5}
-                      maximumValue={2.0}
-                      step={0.05}
-                      value={pitch}
-                      onValueChange={(value) => applyPitchChange(value)}
-                      minimumTrackTintColor={uiTextColor}
-                      maximumTrackTintColor={theme.border}
-                      thumbTintColor={uiTextColor}
-                    />
-                    <View style={styles.quickStepperInline}>
-                      <TouchableOpacity
-                        style={styles.quickStepButton}
-                        onPress={() => applyPitchChange(stepAdjust(pitch, 0.05, 0.5, 2.0, -1))}
-                      >
-                        <Text style={[styles.quickStepText, { color: uiTextColor }]}>-</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.quickStepButton}
-                        onPress={() => applyPitchChange(stepAdjust(pitch, 0.05, 0.5, 2.0, 1))}
-                      >
-                        <Text style={[styles.quickStepText, { color: uiTextColor }]}>+</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {settingsTab === "fonts" && (
-            <View style={styles.quickRow}>
-              <View style={styles.quickRowHeader}>
-                <Text style={[styles.quickLabel, { color: uiTextColor }]}>
-                  Font Size: {fontSize.toFixed(0)}
-                </Text>
-              </View>
-              <View style={styles.quickSliderRow}>
-                <Slider
-                  style={styles.quickSlider}
-                  minimumValue={14}
-                  maximumValue={26}
-                  step={1}
-                  value={fontSize}
-                  onValueChange={(value) => setFontSize(value)}
-                  minimumTrackTintColor={uiTextColor}
-                  maximumTrackTintColor={theme.border}
-                  thumbTintColor={uiTextColor}
-                />
-                <View style={styles.quickStepperInline}>
-                  <TouchableOpacity
-                    style={styles.quickStepButton}
-                    onPress={() => setFontSize((v) => stepAdjust(v, 1, 14, 26, -1))}
-                  >
-                    <Text style={[styles.quickStepText, { color: uiTextColor }]}>-</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.quickStepButton}
-                    onPress={() => setFontSize((v) => stepAdjust(v, 1, 14, 26, 1))}
-                  >
-                    <Text style={[styles.quickStepText, { color: uiTextColor }]}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-            )}
-
-            {settingsTab === "spacing" && (
-              <View style={styles.quickRow}>
-                <View style={styles.quickRowHeader}>
-                  <Text style={[styles.quickLabel, { color: uiTextColor }]}>
-                    Line Spacing: {lineHeight.toFixed(2)}
-                  </Text>
-                </View>
-                <View style={styles.quickSliderRow}>
-                  <Slider
-                    style={styles.quickSlider}
-                    minimumValue={1.1}
-                    maximumValue={2.6}
-                    step={0.05}
-                    value={lineHeight}
-                    onValueChange={(value) => setLineHeight(Number(value.toFixed(2)))}
-                    minimumTrackTintColor={uiTextColor}
-                    maximumTrackTintColor={theme.border}
-                    thumbTintColor={uiTextColor}
-                  />
-                  <View style={styles.quickStepperInline}>
-                    <TouchableOpacity
-                      style={styles.quickStepButton}
-                      onPress={() =>
-                        setLineHeight((v) => stepAdjust(v, 0.05, 1.1, 2.6, -1))
-                      }
-                    >
-                      <Text style={[styles.quickStepText, { color: uiTextColor }]}>-</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.quickStepButton}
-                      onPress={() =>
-                        setLineHeight((v) => stepAdjust(v, 0.05, 1.1, 2.6, 1))
-                      }
-                    >
-                      <Text style={[styles.quickStepText, { color: uiTextColor }]}>+</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {settingsTab === "spacing" && (
-              <View style={styles.quickRow}>
-                <View style={styles.quickRowHeader}>
-                  <Text style={[styles.quickLabel, { color: uiTextColor }]}>
-                    Word Spacing: {wordSpacing.toFixed(0)}pt
-                  </Text>
-                </View>
-                <View style={styles.quickSliderRow}>
-                  <Slider
-                    style={styles.quickSlider}
-                    minimumValue={0}
-                    maximumValue={12}
-                    step={1}
-                    value={wordSpacing}
-                    onValueChange={(value) => setWordSpacing(value)}
-                    minimumTrackTintColor={uiTextColor}
-                    maximumTrackTintColor={theme.border}
-                    thumbTintColor={uiTextColor}
-                  />
-                  <View style={styles.quickStepperInline}>
-                    <TouchableOpacity
-                      style={styles.quickStepButton}
-                      onPress={() => setWordSpacing((v) => stepAdjust(v, 1, 0, 12, -1))}
-                    >
-                      <Text style={[styles.quickStepText, { color: uiTextColor }]}>-</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.quickStepButton}
-                      onPress={() => setWordSpacing((v) => stepAdjust(v, 1, 0, 12, 1))}
-                    >
-                      <Text style={[styles.quickStepText, { color: uiTextColor }]}>+</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {settingsTab === "spacing" && (
-              <View style={styles.quickRow}>
-                <View style={styles.quickRowHeader}>
-                  <Text style={[styles.quickLabel, { color: uiTextColor }]}>
-                    Letter Spacing: {letterSpacing.toFixed(2)}
-                  </Text>
-                </View>
-                <View style={styles.quickSliderRow}>
-                  <Slider
-                    style={styles.quickSlider}
-                    minimumValue={0}
-                    maximumValue={1.2}
-                    step={0.05}
-                    value={letterSpacing}
-                    onValueChange={(value) => setLetterSpacing(Number(value.toFixed(2)))}
-                    minimumTrackTintColor={uiTextColor}
-                    maximumTrackTintColor={theme.border}
-                    thumbTintColor={uiTextColor}
-                  />
-                  <View style={styles.quickStepperInline}>
-                    <TouchableOpacity
-                      style={styles.quickStepButton}
-                      onPress={() =>
-                        setLetterSpacing((v) => stepAdjust(v, 0.05, 0, 1.2, -1))
-                      }
-                    >
-                      <Text style={[styles.quickStepText, { color: uiTextColor }]}>-</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.quickStepButton}
-                      onPress={() =>
-                        setLetterSpacing((v) => stepAdjust(v, 0.05, 0, 1.2, 1))
-                      }
-                    >
-                      <Text style={[styles.quickStepText, { color: uiTextColor }]}>+</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </View>
-            )}
-
-            {settingsTab === "colors" && (
-              <View style={styles.quickRow}>
-                <View
-                  style={[
-                    styles.colorTargetSegmented,
-                    { borderColor: theme.border, backgroundColor: "rgba(127,127,127,0.10)" },
-                  ]}
-                >
-                  {[
-                    { key: "text", label: "Text" },
-                    { key: "highlight", label: "Highlight" },
-                    { key: "readingArea", label: "Background" },
-                  ].map((target, index, arr) => {
-                    const item = colorTargets[target.key];
-                    const active = activeColorTarget === target.key;
-                    const isLast = index === arr.length - 1;
-                    return (
-                      <TouchableOpacity
-                        key={target.key}
-                        style={[
-                          styles.colorTargetButton,
-                          !isLast && { borderRightWidth: 1, borderRightColor: theme.border },
-                          active && { backgroundColor: uiTextColor },
-                        ]}
-                        onPress={() => setActiveColorTarget(target.key)}
-                      >
-                        <View style={[styles.colorPreviewSmall, { backgroundColor: item.preview }]} />
-                        <Text
-                          numberOfLines={1}
-                          style={[
-                            styles.colorTargetText,
-                            { color: active ? theme.background : uiTextColor },
-                          ]}
-                        >
-                          {target.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-            )}
-
-            {settingsTab === "colors" && (
-              <View style={styles.quickRow}>
-                <View
-                  style={styles.shadePanel}
-                  onLayout={(event) => {
-                    const { width, height } = event.nativeEvent.layout;
-                    if (width && height) setShadeBoxSize({ width, height });
-                  }}
-                >
-                  {activeShadeGrid.map((row, rowIndex) => (
-                    <View key={`r-${rowIndex}`} style={styles.shadeRow}>
-                      {row.map((color, colIndex) => (
-                        <View
-                          key={`c-${rowIndex}-${colIndex}`}
-                          style={[styles.shadeCell, { backgroundColor: color }]}
-                        />
-                      ))}
-                    </View>
-                  ))}
-                  <View
-                    style={[
-                      styles.shadePointer,
-                      {
-                        left: clamp(
-                          activeInteractiveColor.saturation * shadeBoxSize.width - 8,
-                          0,
-                          Math.max(0, shadeBoxSize.width - 16)
-                        ),
-                        top: clamp(
-                          (1 - activeInteractiveColor.value) * shadeBoxSize.height - 8,
-                          0,
-                          Math.max(0, shadeBoxSize.height - 16)
-                        ),
-                        borderColor: isDarkBackground ? "#FFFFFF" : "#1F1F1F",
-                      },
-                    ]}
-                    pointerEvents="none"
-                  />
-                  <View style={styles.shadeTouchLayer} {...shadePanResponder.panHandlers} />
-                </View>
-                <View style={styles.quickSliderRow}>
-                  {renderHueSlider(
-                    activeInteractiveColor.hue,
-                    (value) => {
-                      const nextHue = Number(value.toFixed(0));
-                      setDraftColorSafe((prev) => ({
-                        ...prev,
-                        hue: nextHue,
-                      }));
-                    },
-                    (value) => {
-                      const nextHue = Number(value.toFixed(0));
-                      const next = {
-                        ...draftColorRef.current,
-                        hue: nextHue,
-                      };
-                      setDraftColorSafe(next);
-                      activeColor.setHue(next.hue);
-                      activeColor.setSaturation(Number(next.saturation.toFixed(3)));
-                      activeColor.setValue(Number(next.value.toFixed(3)));
-                      setIsHueSliding(false);
-                    },
-                    activeHueTrackColors,
-                    () => {
-                      setDraftColorSafe({
-                        hue: activeColor.hue,
-                        saturation: activeColor.saturation,
-                        value: activeColor.value,
-                      });
-                      setIsHueSliding(true);
-                    }
                   )}
-                </View>
-              </View>
-            )}
 
-            </ScrollView>
+                  {settingsTab === "colors" && (
+                    <View style={styles.quickRow}>
+                      <View
+                        style={styles.shadePanel}
+                        onLayout={(event) => {
+                          const { width, height } = event.nativeEvent.layout;
+                          if (width && height) setShadeBoxSize({ width, height });
+                        }}
+                      >
+                        {activeShadeGrid.map((row, rowIndex) => (
+                          <View key={`r-${rowIndex}`} style={styles.shadeRow}>
+                            {row.map((color, colIndex) => (
+                              <View
+                                key={`c-${rowIndex}-${colIndex}`}
+                                style={[styles.shadeCell, { backgroundColor: color }]}
+                              />
+                            ))}
+                          </View>
+                        ))}
+                        <View
+                          style={[
+                            styles.shadePointer,
+                            {
+                              left: clamp(
+                                activeInteractiveColor.saturation * shadeBoxSize.width - 8,
+                                0,
+                                Math.max(0, shadeBoxSize.width - 16)
+                              ),
+                              top: clamp(
+                                (1 - activeInteractiveColor.value) * shadeBoxSize.height - 8,
+                                0,
+                                Math.max(0, shadeBoxSize.height - 16)
+                              ),
+                              borderColor: isDarkBackground ? "#FFFFFF" : "#1F1F1F",
+                            },
+                          ]}
+                          pointerEvents="none"
+                        />
+                        <View style={styles.shadeTouchLayer} {...shadePanResponder.panHandlers} />
+                      </View>
+                      <View style={styles.quickSliderRow}>
+                        {renderHueSlider(
+                          activeInteractiveColor.hue,
+                          (value) => {
+                            const nextHue = Number(value.toFixed(0));
+                            setDraftColorSafe((prev) => ({
+                              ...prev,
+                              hue: nextHue,
+                            }));
+                          },
+                          (value) => {
+                            const nextHue = Number(value.toFixed(0));
+                            const next = {
+                              ...draftColorRef.current,
+                              hue: nextHue,
+                            };
+                            setDraftColorSafe(next);
+                            activeColor.setHue(next.hue);
+                            activeColor.setSaturation(Number(next.saturation.toFixed(3)));
+                            activeColor.setValue(Number(next.value.toFixed(3)));
+                            setIsHueSliding(false);
+                          },
+                          activeHueTrackColors,
+                          () => {
+                            setDraftColorSafe({
+                              hue: activeColor.hue,
+                              saturation: activeColor.saturation,
+                              value: activeColor.value,
+                            });
+                            setIsHueSliding(true);
+                          }
+                        )}
+                      </View>
+                    </View>
+                  )}
+
+                </ScrollView>
           </View>
         </View>
       </Modal>
@@ -3439,7 +3434,30 @@ export default function ReaderScreen({ route, navigation }) {
           </View>
         </View>
       </Modal>
-      
+
+      {!isFullScreen && !isEditMode && (
+        <ReaderControls
+          isPlaying={isPlaying}
+          onPlayPause={handlePlayPause}
+          onBackward={handleBackward}
+          onForward={handleForward}
+          onOpenSpeed={() => setShowSpeedPanel((prev) => !prev)}
+          onOpenSettings={() => setShowQuickSettings(true)}
+          readingSpeed={readingSpeed}
+          isSpeedPanelOpen={showSpeedPanel}
+          theme={theme}
+          textColor={uiTextColor}
+          controlsDisabled={isEditMode || isSaving || isSegmentLoading}
+        />
+      )}
+
+      <WordOptionModal
+        visible={isWordModalVisible}
+        onClose={() => setIsWordModalVisible(false)}
+        word={selectedWord}
+        theme={theme}
+        textColor={uiTextColor}
+      />
     </SafeAreaView>
   );
 }
