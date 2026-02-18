@@ -8,7 +8,7 @@ Reading & Accessibility
 6. Dyslexia-friendly font (Lexend / OpenDyslexic)
 7. Adjustable font size
 8. Adjustable line spacing
-9. Background themes (white, yellow, blue, dark)
+9. Background themes 
 10. Focused reading UI (minimal distractions)
 
 Usability
@@ -31,18 +31,16 @@ Input & Convenience
 
 ADVANCED FEATURES (OPTIONAL, IF TIME)
 Language & Comprehension
-21. Hard word detection
-22. Tap word -> pronunciation
-23. Simple meaning lookup
-24. Syllable breakdown
-24b. Heading/chapter index navigation for long documents
+21. Tap word -> pronunciation
+22. Simple meaning lookup
+23. Syllable breakdown
 
 BACKEND
 Supabase Integration
-25. User authentication (optional)
-26. Cloud sync for saved texts
-27. Sync settings across devices
-28. Store anonymized reading sessions
+24. User authentication (optional)
+25. Cloud sync for saved texts
+26. Sync settings across devices
+27. Store anonymized reading sessions
 
 NOTE
 Optional deferred features are tracked in:

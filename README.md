@@ -41,6 +41,20 @@ npm install
 npx expo start
 ```
 
+### Local Extraction Backend (Recommended)
+
+1. Start backend:
+```bash
+cd server
+npm install
+npm run dev
+```
+2. In app `.env`, set:
+```bash
+EXPO_PUBLIC_EXTRACTION_API_BASE_URL=http://<YOUR_LOCAL_IP>:5050
+EXPO_PUBLIC_EXTRACTION_API_TOKEN=<same as server API_ACCESS_TOKEN if enabled>
+```
+
 ## Project Structure
 
 ```bash
