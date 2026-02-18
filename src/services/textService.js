@@ -1,4 +1,5 @@
 
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import Hypher from "hypher";
 import englishUs from "hyphenation.en-us";
 
@@ -15,8 +16,145 @@ const KNOWN_ONSETS = new Set([
 ]);
 
 const hypher = new Hypher(englishUs);
+const WORD_DEFINITION_CACHE_KEY = "wordDefinitionCache:v1";
+const WORD_DEFINITION_CACHE_LIMIT = 500;
+let wordDefinitionCache = null;
+let wordDefinitionCacheLoadPromise = null;
 
 const isVowel = (char) => VOWELS.has(String(char || "").toLowerCase());
+const toCleanWord = (word) =>
+  String(word || "")
+    .replace(/[^a-zA-Z]/g, "")
+    .toLowerCase();
+
+const loadWordDefinitionCache = async () => {
+  if (wordDefinitionCache) return wordDefinitionCache;
+  if (wordDefinitionCacheLoadPromise) return wordDefinitionCacheLoadPromise;
+  wordDefinitionCacheLoadPromise = AsyncStorage.getItem(WORD_DEFINITION_CACHE_KEY)
+    .then((raw) => {
+      const parsed = raw ? JSON.parse(raw) : {};
+      wordDefinitionCache = parsed && typeof parsed === "object" ? parsed : {};
+      return wordDefinitionCache;
+    })
+    .catch(() => {
+      wordDefinitionCache = {};
+      return wordDefinitionCache;
+    })
+    .finally(() => {
+      wordDefinitionCacheLoadPromise = null;
+    });
+  return wordDefinitionCacheLoadPromise;
+};
+
+const trimWordDefinitionCache = (cache) => {
+  const entries = Object.entries(cache || {});
+  if (entries.length <= WORD_DEFINITION_CACHE_LIMIT) return cache;
+  const sorted = entries.sort(
+    (a, b) => Number(b[1]?.updatedAt || 0) - Number(a[1]?.updatedAt || 0)
+  );
+  return Object.fromEntries(sorted.slice(0, WORD_DEFINITION_CACHE_LIMIT));
+};
+
+const persistWordDefinitionCache = async (cache) => {
+  const trimmed = trimWordDefinitionCache(cache || {});
+  wordDefinitionCache = trimmed;
+  try {
+    await AsyncStorage.setItem(WORD_DEFINITION_CACHE_KEY, JSON.stringify(trimmed));
+  } catch {
+    // Ignore storage failures; in-memory cache still helps current session.
+  }
+};
+
+const parseDefinitionPayload = (entry) => {
+  const meaning = entry?.meanings?.[0];
+  const definition = meaning?.definitions?.[0]?.definition;
+  const phonetic =
+    entry?.phonetic || (entry?.phonetics || []).find((item) => item?.text)?.text;
+  if (!definition) return null;
+  return {
+    word: String(entry?.word || ""),
+    phonetic: phonetic ? String(phonetic) : undefined,
+    partOfSpeech: meaning?.partOfSpeech ? String(meaning.partOfSpeech) : undefined,
+    definition: String(definition),
+  };
+};
+
+const toWikipediaTitle = (word) =>
+  String(word || "")
+    .replace(/[^a-zA-Z\s'-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const trimDefinitionText = (value, maxLength = 280) => {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  if (text.length <= maxLength) return text;
+  const clipped = text.slice(0, maxLength);
+  const sentenceStop = Math.max(clipped.lastIndexOf(". "), clipped.lastIndexOf("; "));
+  if (sentenceStop > 80) {
+    return clipped.slice(0, sentenceStop + 1).trim();
+  }
+  return `${clipped.trimEnd()}...`;
+};
+
+const parseWikipediaSummary = (payload, fallbackWord) => {
+  if (!payload || typeof payload !== "object") return null;
+  if (payload.type === "disambiguation") return null;
+
+  const definition = trimDefinitionText(payload.extract);
+  if (!definition) return null;
+
+  const description = String(payload.description || "").trim();
+  return {
+    word: String(payload.title || fallbackWord || ""),
+    partOfSpeech: description || "reference",
+    definition,
+  };
+};
+
+const getCachedDefinition = (cache, cleanWord) => {
+  const cached = cache?.[cleanWord];
+  if (!cached?.definition) return null;
+  const { updatedAt: _updatedAt, ...cachedPayload } = cached;
+  return { ...cachedPayload, source: "offline-cache" };
+};
+
+const fetchWikipediaDefinition = async (word) => {
+  const title = toWikipediaTitle(word);
+  if (!title) return null;
+
+  const controller =
+    typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timeoutId = setTimeout(() => controller?.abort?.(), 5000);
+
+  try {
+    const response = await fetch(
+      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`,
+      controller ? { signal: controller.signal } : undefined
+    );
+    if (!response.ok) return null;
+    const payload = await response.json();
+    return parseWikipediaSummary(payload, title);
+  } catch (error) {
+    if (!isLikelyOfflineLookupError(error)) {
+      console.warn("Wikipedia summary lookup failed", error);
+    }
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+const isLikelyOfflineLookupError = (error) => {
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    error?.name === "AbortError" ||
+    message.includes("network request failed") ||
+    message.includes("failed to fetch") ||
+    message.includes("load failed") ||
+    message.includes("timeout")
+  );
+};
 
 const splitByCoreHeuristic = (word) => {
   const parts = [];
@@ -96,33 +234,58 @@ const splitByCoreHeuristic = (word) => {
 
 
 export const getWordDefinition = async (word) => {
+  const cleanWord = toCleanWord(word);
+  if (!cleanWord) return null;
+  const cache = await loadWordDefinitionCache();
+  const controller =
+    typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timeoutId = setTimeout(() => controller?.abort?.(), 6000);
+
   try {
-    const cleanWord = word.replace(/[^a-zA-Z]/g, "");
-    if (!cleanWord) return null;
-
-    const response = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${cleanWord}`);
-    if (!response.ok) {
-      return null;
+    const response = await fetch(
+      `https://api.dictionaryapi.dev/api/v2/entries/en/${cleanWord}`,
+      controller ? { signal: controller.signal } : undefined
+    );
+    if (response.ok) {
+      const data = await response.json();
+      if (Array.isArray(data) && data.length > 0) {
+        const parsed = parseDefinitionPayload(data[0]);
+        if (parsed) {
+          const nextCache = {
+            ...cache,
+            [cleanWord]: { ...parsed, updatedAt: Date.now() },
+          };
+          await persistWordDefinitionCache(nextCache);
+          return { ...parsed, source: "dictionaryapi.dev" };
+        }
+      }
     }
-    const data = await response.json();
-    if (Array.isArray(data) && data.length > 0) {
-      const entry = data[0];
-      const meaning = entry.meanings[0];
-      const definition = meaning?.definitions[0]?.definition;
-      const phonetic = entry.phonetic || (entry.phonetics.find((p) => p.text)?.text);
 
-      return {
-        word: entry.word,
-        phonetic,
-        partOfSpeech: meaning?.partOfSpeech,
-        definition,
-        source: "dictionaryapi.dev",
+    // Fallback for names/places and other proper nouns not covered by dictionary API.
+    const wikiDefinition = await fetchWikipediaDefinition(word);
+    if (wikiDefinition) {
+      const nextCache = {
+        ...cache,
+        [cleanWord]: { ...wikiDefinition, updatedAt: Date.now() },
       };
+      await persistWordDefinitionCache(nextCache);
+      return { ...wikiDefinition, source: "wikipedia" };
+    }
+
+    return getCachedDefinition(cache, cleanWord);
+  } catch (error) {
+    const isOfflineError = isLikelyOfflineLookupError(error);
+    if (!isOfflineError) {
+      console.warn("Dictionary lookup failed", error);
+    }
+    const cached = getCachedDefinition(cache, cleanWord);
+    if (cached) return cached;
+    if (isOfflineError) {
+      return { unavailableReason: "offline" };
     }
     return null;
-  } catch (error) {
-    console.warn("Dictionary lookup failed", error);
-    return null;
+  } finally {
+    clearTimeout(timeoutId);
   }
 };
 

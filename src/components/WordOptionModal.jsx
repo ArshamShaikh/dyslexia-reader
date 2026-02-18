@@ -92,15 +92,21 @@ export default function WordOptionModal({
 }) {
   const [definition, setDefinition] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [meaningStatus, setMeaningStatus] = useState("idle");
   const [syllables, setSyllables] = useState([]);
   const [activeSyllableIndex, setActiveSyllableIndex] = useState(-1);
   const [isPronouncing, setIsPronouncing] = useState(false);
   const syllableTimersRef = useRef([]);
+  const sectionLabelColor = textColor;
+  const secondaryTextColor = textColor;
+  const syllableBorderColor = textColor;
+  const syllableIdleBackground = "rgba(127,127,127,0.10)";
 
   useEffect(() => {
     if (visible && word) {
       setLoading(true);
       setDefinition(null);
+      setMeaningStatus("idle");
       setActiveSyllableIndex(-1);
       setIsPronouncing(false);
 
@@ -108,8 +114,20 @@ export default function WordOptionModal({
       setSyllables(parts);
 
       getWordDefinition(word)
-        .then((def) => {
-          setDefinition(def);
+        .then((result) => {
+          if (result?.definition) {
+            setDefinition(result);
+            setMeaningStatus("ready");
+            return;
+          }
+          setDefinition(null);
+          setMeaningStatus(
+            result?.unavailableReason === "offline" ? "offline" : "unavailable"
+          );
+        })
+        .catch(() => {
+          setDefinition(null);
+          setMeaningStatus("unavailable");
         })
         .finally(() => {
           setLoading(false);
@@ -243,7 +261,7 @@ export default function WordOptionModal({
 
               {syllables.length > 0 && (
                 <View style={[styles.section, { borderColor: theme.border }]}> 
-                  <Text style={[styles.sectionLabel, { color: theme.border }]}>SYLLABLES</Text>
+                  <Text style={[styles.sectionLabel, { color: sectionLabelColor }]}>SYLLABLES</Text>
                   <View style={styles.syllableWrap}>
                     {syllables.map((part, index) => (
                       <View
@@ -251,11 +269,11 @@ export default function WordOptionModal({
                         style={[
                           styles.syllableChip,
                           {
-                            borderColor: theme.border,
+                            borderColor: syllableBorderColor,
                             backgroundColor:
                               index === activeSyllableIndex
                                 ? textColor
-                                : "transparent",
+                                : syllableIdleBackground,
                           },
                         ]}
                       >
@@ -266,7 +284,7 @@ export default function WordOptionModal({
                               color:
                                 index === activeSyllableIndex
                                   ? theme.highlight
-                                  : textColor,
+                                  : secondaryTextColor,
                             },
                           ]}
                         >
@@ -279,13 +297,13 @@ export default function WordOptionModal({
               )}
 
               <View style={[styles.section, { borderColor: theme.border }]}> 
-                <Text style={[styles.sectionLabel, { color: theme.border }]}>MEANING</Text>
+                <Text style={[styles.sectionLabel, { color: sectionLabelColor }]}>MEANING</Text>
                 {loading ? (
                   <ActivityIndicator size="small" color={textColor} style={styles.loader} />
                 ) : definition ? (
                   <View style={styles.definitionBlock}>
                     {definition.phonetic && (
-                      <Text style={[styles.phonetic, { color: theme.border }]}>
+                      <Text style={[styles.phonetic, { color: secondaryTextColor }]}>
                         {definition.phonetic}
                       </Text>
                     )}
@@ -297,7 +315,11 @@ export default function WordOptionModal({
                     </Text>
                   </View>
                 ) : (
-                  <Text style={[styles.errorText, { color: theme.border }]}>Definition not found.</Text>
+                  <Text style={[styles.errorText, { color: secondaryTextColor }]}>
+                    {meaningStatus === "offline"
+                      ? "No internet right now. Turn it on and try again."
+                      : "Meaning not available."}
+                  </Text>
                 )}
               </View>
             </View>
@@ -374,6 +396,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginBottom: 7,
     textTransform: "uppercase",
+    opacity: 0.86,
   },
   syllableWrap: {
     flexDirection: "row",
@@ -390,6 +413,7 @@ const styles = StyleSheet.create({
   syllableText: {
     fontSize: 14,
     fontFamily: "Lexend-Regular",
+    fontWeight: "600",
   },
   loader: {
     alignSelf: "flex-start",
@@ -403,6 +427,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 1,
     fontStyle: "italic",
+    opacity: 0.9,
   },
   partOfSpeech: {
     fontSize: 12,
@@ -416,7 +441,8 @@ const styles = StyleSheet.create({
     fontFamily: "Lexend-Regular",
   },
   errorText: {
-    fontSize: 13,
-    fontStyle: "italic",
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: "500",
   },
 });
