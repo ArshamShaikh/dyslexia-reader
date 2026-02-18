@@ -4,6 +4,20 @@ import { THEMES } from "../theme/colors";
 
 const SettingsContext = createContext(null);
 const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+const DEFAULTS = {
+  fontFamily: "Lexend",
+  fontSize: 18,
+  lineHeight: 1.5,
+  wordSpacing: 5,
+  letterSpacing: 0.35,
+  textBoxPadding: 16,
+  backgroundTheme: "light",
+  highlightStrength: 0.6,
+  readingSpeed: 0.6,
+  pitch: 1.0,
+  colorMode: "preset",
+  colorPresetId: "calm",
+};
 
 const LIMITS = {
   fontSize: [14, 26],
@@ -19,20 +33,22 @@ const LIMITS = {
 };
 
 export const SettingsProvider = ({ children }) => {
-  const [fontFamily, setFontFamily] = useState("Lexend");
+  const [fontFamily, setFontFamily] = useState(DEFAULTS.fontFamily);
   const [uiFontFamily, setUiFontFamily] = useState("System");
   const [applyUiFontEverywhere, setApplyUiFontEverywhere] = useState(false);
-  const [fontSize, setFontSize] = useState(18);
-  const [lineHeight, setLineHeight] = useState(1.5);
-  const [wordSpacing, setWordSpacing] = useState(4);
-  const [letterSpacing, setLetterSpacing] = useState(0.3);
-  const [textBoxPadding, setTextBoxPadding] = useState(16);
+  const [fontSize, setFontSize] = useState(DEFAULTS.fontSize);
+  const [lineHeight, setLineHeight] = useState(DEFAULTS.lineHeight);
+  const [wordSpacing, setWordSpacing] = useState(DEFAULTS.wordSpacing);
+  const [letterSpacing, setLetterSpacing] = useState(DEFAULTS.letterSpacing);
+  const [textBoxPadding, setTextBoxPadding] = useState(DEFAULTS.textBoxPadding);
   const [showTextBox, setShowTextBox] = useState(true);
-  const [backgroundTheme, setBackgroundTheme] = useState("light");
+  const [backgroundTheme, setBackgroundTheme] = useState(DEFAULTS.backgroundTheme);
   const [textColor, setTextColor] = useState(THEMES.light.text);
-  const [highlightStrength, setHighlightStrength] = useState(0.6);
-  const [readingSpeed, setReadingSpeed] = useState(0.6);
-  const [pitch, setPitch] = useState(1.0);
+  const [highlightStrength, setHighlightStrength] = useState(DEFAULTS.highlightStrength);
+  const [readingSpeed, setReadingSpeed] = useState(DEFAULTS.readingSpeed);
+  const [pitch, setPitch] = useState(DEFAULTS.pitch);
+  const [colorMode, setColorMode] = useState(DEFAULTS.colorMode);
+  const [colorPresetId, setColorPresetId] = useState(DEFAULTS.colorPresetId);
   const [ttsVoiceName, setTtsVoiceName] = useState("");
   const [highlightHue, setHighlightHue] = useState(220);
   const [textHue, setTextHue] = useState(220);
@@ -195,6 +211,12 @@ export const SettingsProvider = ({ children }) => {
         if (stored.readingSpeed) setSafeReadingSpeed(stored.readingSpeed);
         if (typeof stored.pitch === "number") setSafePitch(stored.pitch);
         if (typeof stored.ttsVoiceName === "string") setTtsVoiceName(stored.ttsVoiceName);
+        if (stored.colorMode === "preset" || stored.colorMode === "custom") {
+          setColorMode(stored.colorMode);
+        }
+        if (typeof stored.colorPresetId === "string" && stored.colorPresetId.trim()) {
+          setColorPresetId(stored.colorPresetId);
+        }
       }
       didLoadRef.current = true;
     });
@@ -233,6 +255,8 @@ export const SettingsProvider = ({ children }) => {
         highlightValue,
         readingAreaSaturation,
         readingAreaValue,
+        colorMode,
+        colorPresetId,
       });
     }, 200);
   }, [
@@ -260,6 +284,8 @@ export const SettingsProvider = ({ children }) => {
     highlightValue,
     readingAreaSaturation,
     readingAreaValue,
+    colorMode,
+    colorPresetId,
   ]);
 
   useEffect(() => {
@@ -353,6 +379,10 @@ export const SettingsProvider = ({ children }) => {
     setReadingAreaSaturation: setSafeReadingAreaSaturation,
     readingAreaValue,
     setReadingAreaValue: setSafeReadingAreaValue,
+    colorMode,
+    setColorMode,
+    colorPresetId,
+    setColorPresetId,
   };
 
   return (

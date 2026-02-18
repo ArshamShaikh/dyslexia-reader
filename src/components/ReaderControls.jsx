@@ -40,7 +40,7 @@ export default function ReaderControls({
           disabled={controlsDisabled}
           accessibilityLabel="Previous line"
         >
-          <MaterialIcons name="replay-5" size={18} color={textColor} />
+          <MaterialIcons name="skip-previous" size={20} color={textColor} />
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -74,7 +74,7 @@ export default function ReaderControls({
           disabled={controlsDisabled}
           accessibilityLabel="Next line"
         >
-          <MaterialIcons name="forward-5" size={18} color={textColor} />
+          <MaterialIcons name="skip-next" size={20} color={textColor} />
         </TouchableOpacity>
 
         <TouchableOpacity

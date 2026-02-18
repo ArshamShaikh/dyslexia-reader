@@ -22,7 +22,7 @@ import WordOptionModal from "../components/WordOptionModal";
 import ReaderControls from "../components/ReaderControls";
 import { useSettings } from "../context/SettingsContext";
 import { getReaderSessionText } from "../services/readerSessionService";
-import { addSavedText, getSavedTexts, isTextSaved } from "../services/storageService";
+import { addSavedText, isTextSaved } from "../services/storageService";
 import {
   getNativeVoices,
   isNativeTtsAvailable,
@@ -39,7 +39,7 @@ import { splitIntoLines, splitIntoSegments } from "../utils/textParser";
 
 export default function ReaderScreen({ route, navigation }) {
   const { text = "", sessionId = "" } = route.params || {};
-  const MAX_TOTAL_CHARS = 500000;
+  const MAX_TOTAL_CHARS = 1500000;
   // Keep each spoken part safely below Android TTS single-utterance limits
   // across device vendors (some engines fail above ~2k chars).
   const SEGMENT_CHARS = 1800;
@@ -70,6 +70,7 @@ export default function ReaderScreen({ route, navigation }) {
   const [showQuickSettings, setShowQuickSettings] = useState(false);
   const [showSpeedPanel, setShowSpeedPanel] = useState(false);
   const [partInputValue, setPartInputValue] = useState("1");
+  const [isPartInputEditing, setIsPartInputEditing] = useState(false);
   const [partSearchQuery, setPartSearchQuery] = useState("");
   const [partSearchCursor, setPartSearchCursor] = useState(-1);
   const [isSegmentLoading, setIsSegmentLoading] = useState(false);
@@ -88,16 +89,10 @@ export default function ReaderScreen({ route, navigation }) {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [isSaved, setIsSaved] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [showSaveFolderPicker, setShowSaveFolderPicker] = useState(false);
-  const [saveFolderOptions, setSaveFolderOptions] = useState([]);
-  const [selectedSaveFolder, setSelectedSaveFolder] = useState("");
-  const [showSaveNewFolderInput, setShowSaveNewFolderInput] = useState(false);
-  const [saveFolderInput, setSaveFolderInput] = useState("");
-  const [saveTitleInput, setSaveTitleInput] = useState("");
-  const [isSaveFolderLoading, setIsSaveFolderLoading] = useState(false);
   const [availableVoices, setAvailableVoices] = useState([]);
-  const [showAllVoices, setShowAllVoices] = useState(false);
   const [showVoiceSection, setShowVoiceSection] = useState(false);
+  const [showVoiceHelp, setShowVoiceHelp] = useState(false);
+  const [voicePageIndex, setVoicePageIndex] = useState(0);
   const [previewVoiceName, setPreviewVoiceName] = useState("");
   const [containerWidth, setContainerWidth] = useState(0);
   const [avgCharWidth, setAvgCharWidth] = useState(0);
@@ -166,6 +161,10 @@ export default function ReaderScreen({ route, navigation }) {
     readingAreaHue,
     readingAreaSaturation,
     readingAreaValue,
+    colorMode,
+    setColorMode,
+    colorPresetId,
+    setColorPresetId,
     setReadingSpeed,
     setPitch,
     ttsVoiceName,
@@ -384,6 +383,35 @@ export default function ReaderScreen({ route, navigation }) {
     const b = parseInt(cleanHex.slice(4, 6), 16);
     return `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(2)})`;
   };
+  const hexToRgb = (hex) => {
+    const normalized = String(hex || "").trim().replace("#", "");
+    if (normalized.length === 3) {
+      const r = parseInt(normalized[0] + normalized[0], 16);
+      const g = parseInt(normalized[1] + normalized[1], 16);
+      const b = parseInt(normalized[2] + normalized[2], 16);
+      if ([r, g, b].some((value) => Number.isNaN(value))) return null;
+      return { r, g, b };
+    }
+    if (normalized.length !== 6) return null;
+    const r = parseInt(normalized.slice(0, 2), 16);
+    const g = parseInt(normalized.slice(2, 4), 16);
+    const b = parseInt(normalized.slice(4, 6), 16);
+    if ([r, g, b].some((value) => Number.isNaN(value))) return null;
+    return { r, g, b };
+  };
+  const getRelativeLuminance = (rgb) => {
+    if (!rgb) return 0;
+    const convert = (channel) => {
+      const normalized = channel / 255;
+      return normalized <= 0.03928
+        ? normalized / 12.92
+        : ((normalized + 0.055) / 1.055) ** 2.4;
+    };
+    const r = convert(rgb.r);
+    const g = convert(rgb.g);
+    const b = convert(rgb.b);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
   const textPreviewColor = hsvToHex(textHue, textSaturation, textValue);
   const highlightBase = hsvToHex(highlightHue, highlightSaturation, highlightValue);
   const readingAreaBg = hsvToHex(
@@ -399,6 +427,19 @@ export default function ReaderScreen({ route, navigation }) {
   const searchMatchBg = isDarkBackground
     ? "rgba(255, 215, 64, 0.36)"
     : "rgba(255, 235, 59, 0.55)";
+  const editSelectionColor = useMemo(() => {
+    const targetColor = hexToRgb(readerTextColor) || hexToRgb(uiTextColor);
+    if (!targetColor) {
+      return isDarkBackground
+        ? "rgba(36, 84, 160, 0.68)"
+        : "rgba(150, 202, 255, 0.70)";
+    }
+    const luminance = getRelativeLuminance(targetColor);
+    // Keep selection opposite to text brightness so selected text remains legible.
+    return luminance < 0.42
+      ? "rgba(150, 202, 255, 0.70)"
+      : "rgba(36, 84, 160, 0.68)";
+  }, [isDarkBackground, readerTextColor, uiTextColor]);
   const stepAdjust = (value, step, min, max, direction) => {
     const next = Math.min(max, Math.max(min, value + direction * step));
     return Number(next.toFixed(2));
@@ -440,6 +481,7 @@ export default function ReaderScreen({ route, navigation }) {
   const blurInlineInputs = () => {
     partInputRef.current?.blur?.();
     searchInputRef.current?.blur?.();
+    setIsPartInputEditing(false);
   };
   const previewVoice = (voiceName = "") => {
     if (!useNativeTts) return;
@@ -500,38 +542,52 @@ export default function ReaderScreen({ route, navigation }) {
     return deduped;
   }, [availableVoices, buildVoiceLabel]);
   const allVoices = useMemo(() => {
-    return [...normalizedVoices].sort((a, b) => a.label.localeCompare(b.label));
-  }, [normalizedVoices]);
-  const recommendedVoices = useMemo(() => {
-    const preferred = ["en-in", "en-us", "en-gb", "en-au", "en-ca"];
-    const ranked = [...allVoices].sort((a, b) => {
-      const aTag = a.locale.toLowerCase();
-      const bTag = b.locale.toLowerCase();
-      const aScore = preferred.findIndex((code) => aTag.startsWith(code));
-      const bScore = preferred.findIndex((code) => bTag.startsWith(code));
-      const aRank = aScore === -1 ? 99 : aScore;
-      const bRank = bScore === -1 ? 99 : bScore;
-      if (aRank !== bRank) return aRank - bRank;
+    const localeRank = (localeTag = "") => {
+      const tag = String(localeTag).toLowerCase().replace(/_/g, "-");
+      if (tag.startsWith("en-us")) return 0;
+      if (tag.startsWith("en-gb")) return 1;
+      if (tag.startsWith("en-au")) return 2;
+      if (tag.startsWith("en-ca")) return 3;
+      if (tag.startsWith("en-in")) return 4;
+      if (tag.startsWith("en")) return 5;
+      return 9;
+    };
+    return [...normalizedVoices].sort((a, b) => {
+      const rankA = localeRank(a.locale);
+      const rankB = localeRank(b.locale);
+      if (rankA !== rankB) return rankA - rankB;
+
+      // Keep base locale labels (e.g., "Eng (US)") before variant-coded names.
+      const baseA = voiceLocaleLabel(a.locale);
+      const baseB = voiceLocaleLabel(b.locale);
+      const variantPenaltyA = a.label === baseA ? 0 : 1;
+      const variantPenaltyB = b.label === baseB ? 0 : 1;
+      if (variantPenaltyA !== variantPenaltyB) return variantPenaltyA - variantPenaltyB;
+
       return a.label.localeCompare(b.label);
     });
-    const picked = ranked.slice(0, 6);
-    if (
-      ttsVoiceName &&
-      !picked.some((voice) => voice.name === ttsVoiceName)
-    ) {
-      const selected = ranked.find((voice) => voice.name === ttsVoiceName);
-      if (selected) {
-        return [selected, ...picked.slice(0, 5)];
-      }
-    }
-    return picked;
-  }, [allVoices, ttsVoiceName]);
-  const recommendedVoiceSet = useMemo(() => {
-    return new Set(recommendedVoices.map((voice) => voice.name));
-  }, [recommendedVoices]);
-  const extraVoices = useMemo(() => {
-    return allVoices.filter((voice) => !recommendedVoiceSet.has(voice.name));
-  }, [allVoices, recommendedVoiceSet]);
+  }, [normalizedVoices, voiceLocaleLabel]);
+  const VOICES_PER_PAGE = 8;
+  const voiceOptions = useMemo(() => {
+    return [{ name: "", locale: "", label: "Default" }, ...allVoices];
+  }, [allVoices]);
+  const totalVoicePages = Math.max(1, Math.ceil(voiceOptions.length / VOICES_PER_PAGE));
+  const visibleVoiceOptions = useMemo(() => {
+    const start = voicePageIndex * VOICES_PER_PAGE;
+    return voiceOptions.slice(start, start + VOICES_PER_PAGE);
+  }, [voiceOptions, voicePageIndex]);
+  useEffect(() => {
+    setVoicePageIndex((prev) => Math.max(0, Math.min(prev, totalVoicePages - 1)));
+  }, [totalVoicePages]);
+  useEffect(() => {
+    if (!showVoiceSection) return;
+    const selectedIndex = Math.max(
+      0,
+      voiceOptions.findIndex((voice) => voice.name === ttsVoiceName)
+    );
+    const selectedPage = Math.floor(selectedIndex / VOICES_PER_PAGE);
+    setVoicePageIndex((prev) => (prev === selectedPage ? prev : selectedPage));
+  }, [showVoiceSection, ttsVoiceName, voiceOptions]);
   const renderHueSlider = (value, onChange, onComplete, trackColors, onStart) => (
     <View style={styles.hueSliderWrap}>
       <View style={styles.hueTrack}>
@@ -586,6 +642,86 @@ export default function ReaderScreen({ route, navigation }) {
       label: "Reading Area",
     },
   };
+  const COLOR_PRESETS = useMemo(
+    () => [
+      {
+        id: "calm",
+        label: "Yellow",
+        text: { hue: 214, saturation: 0.74, value: 0.2 },
+        highlight: { hue: 44, saturation: 0.78, value: 0.96 },
+        readingArea: { hue: 52, saturation: 0.28, value: 0.97 },
+      },
+      {
+        id: "paper",
+        label: "Beige",
+        text: { hue: 30, saturation: 0.44, value: 0.16 },
+        highlight: { hue: 38, saturation: 0.62, value: 0.95 },
+        readingArea: { hue: 44, saturation: 0.2, value: 0.98 },
+      },
+      {
+        id: "focus",
+        label: "Green",
+        text: { hue: 150, saturation: 0.52, value: 0.2 },
+        highlight: { hue: 34, saturation: 0.72, value: 0.96 },
+        readingArea: { hue: 118, saturation: 0.2, value: 0.96 },
+      },
+      {
+        id: "high-contrast-light",
+        label: "Blue",
+        text: { hue: 220, saturation: 0.74, value: 0.12 },
+        highlight: { hue: 48, saturation: 0.85, value: 0.98 },
+        readingArea: { hue: 204, saturation: 0.22, value: 0.99 },
+      },
+      {
+        id: "night",
+        label: "Navy",
+        text: { hue: 210, saturation: 0.26, value: 0.96 },
+        highlight: { hue: 195, saturation: 0.84, value: 0.8 },
+        readingArea: { hue: 220, saturation: 0.26, value: 0.16 },
+      },
+    ],
+    []
+  );
+  const applyColorPreset = useCallback(
+    (presetId) => {
+      const preset = COLOR_PRESETS.find((item) => item.id === presetId);
+      if (!preset) return;
+      setTextHue(preset.text.hue);
+      setTextSaturation(preset.text.saturation);
+      setTextValue(preset.text.value);
+      setHighlightHue(preset.highlight.hue);
+      setHighlightSaturation(preset.highlight.saturation);
+      setHighlightValue(preset.highlight.value);
+      setReadingAreaHue(preset.readingArea.hue);
+      setReadingAreaSaturation(preset.readingArea.saturation);
+      setReadingAreaValue(preset.readingArea.value);
+      setColorMode("preset");
+      setColorPresetId(presetId);
+    },
+    [
+      setColorMode,
+      setColorPresetId,
+      setHighlightHue,
+      setHighlightSaturation,
+      setHighlightValue,
+      setReadingAreaHue,
+      setReadingAreaSaturation,
+      setReadingAreaValue,
+      setTextHue,
+      setTextSaturation,
+      setTextValue,
+      COLOR_PRESETS,
+    ]
+  );
+  useEffect(() => {
+    if (colorMode !== "preset") return;
+    const presetExists = COLOR_PRESETS.some((item) => item.id === colorPresetId);
+    const fallbackId = presetExists ? colorPresetId : "calm";
+    if (!presetExists) {
+      setColorPresetId(fallbackId);
+    }
+    applyColorPreset(fallbackId);
+  }, [colorMode, colorPresetId, applyColorPreset, setColorPresetId, COLOR_PRESETS]);
   const activeColor = colorTargets[activeColorTarget] || colorTargets.text;
   const activeInteractiveColor =
     isColorDragging || isHueSliding ? draftColor : activeColor;
@@ -1221,6 +1357,12 @@ export default function ReaderScreen({ route, navigation }) {
     setIsPaused(false);
   };
 
+  const startManualPartInput = () => {
+    if (isSegmentLoading) return;
+    setPartInputValue(String(currentSegmentIndexRef.current + 1));
+    setIsPartInputEditing(true);
+  };
+
   const navigateToSegmentManually = (
     segmentIndex,
     statusMessage = "",
@@ -1236,13 +1378,14 @@ export default function ReaderScreen({ route, navigation }) {
   const commitManualPartInput = () => {
     const trimmed = String(partInputValue || "").trim();
     const parsed = Number.parseInt(trimmed, 10);
+    setIsPartInputEditing(false);
     if (!Number.isFinite(parsed)) {
-      setPartInputValue(String(currentSegmentIndex + 1));
+      setPartInputValue(String(currentSegmentIndexRef.current + 1));
       return;
     }
     const clamped = Math.min(Math.max(parsed, 1), segments.length);
     setPartInputValue(String(clamped));
-    if (clamped - 1 !== currentSegmentIndex) {
+    if (clamped - 1 !== currentSegmentIndexRef.current) {
       navigateToSegmentManually(clamped - 1, `Opening part ${clamped}...`);
     }
   };
@@ -1770,21 +1913,16 @@ export default function ReaderScreen({ route, navigation }) {
 
   const handleSave = async () => {
     if (!fullText || !fullText.trim() || isSaving) return;
-    const targetFolder = String(
-      showSaveNewFolderInput ? saveFolderInput : selectedSaveFolder
-    )
-      .trim();
-    const targetTitle = String(saveTitleInput || "").trim();
-    setShowSaveFolderPicker(false);
-    setShowSaveNewFolderInput(false);
-    setSaveFolderInput("");
-    setSaveTitleInput("");
+    if (isSaved) {
+      setSaveNotice("Already saved");
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = setTimeout(() => setSaveNotice(""), 1400);
+      return;
+    }
     setIsSaving(true);
     setSaveNotice("Saving...");
     try {
-      await addSavedText(fullText, targetTitle || undefined, {
-        folder: targetFolder || "",
-      });
+      await addSavedText(fullText);
       setIsSaved(true);
       setSaveNotice("Saved");
     } catch (_error) {
@@ -1793,44 +1931,6 @@ export default function ReaderScreen({ route, navigation }) {
       setIsSaving(false);
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
       toastTimerRef.current = setTimeout(() => setSaveNotice(""), 1400);
-    }
-  };
-
-  const openSaveFolderPicker = async () => {
-    if (!fullText || !fullText.trim() || isSaving) return;
-    if (isSaved) {
-      setSaveNotice("Already saved");
-      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-      toastTimerRef.current = setTimeout(() => setSaveNotice(""), 1400);
-      return;
-    }
-
-    setSelectedSaveFolder("");
-    setShowSaveNewFolderInput(false);
-    setSaveFolderInput("");
-    setSaveTitleInput(
-      String(fullText || "")
-        .trim()
-        .split(/\s+/)
-        .slice(0, 6)
-        .join(" ")
-    );
-    setShowSaveFolderPicker(true);
-    setIsSaveFolderLoading(true);
-    try {
-      const saved = await getSavedTexts();
-      const uniqueFolders = [
-        ...new Set(
-          saved
-            .map((item) => String(item?.folder || "").trim())
-            .filter(Boolean)
-        ),
-      ].sort((a, b) => a.localeCompare(b));
-      setSaveFolderOptions(uniqueFolders);
-    } catch (_error) {
-      setSaveFolderOptions([]);
-    } finally {
-      setIsSaveFolderLoading(false);
     }
   };
 
@@ -1936,7 +2036,7 @@ export default function ReaderScreen({ route, navigation }) {
                 showTransientNotice("Tap Done to apply edits first");
                 return;
               }
-              openSaveFolderPicker();
+              handleSave();
             }}
             accessibilityLabel="Save text"
             disabled={isSaving || isSegmentLoading || isEditMode}
@@ -2013,30 +2113,51 @@ export default function ReaderScreen({ route, navigation }) {
                     },
                   ]}
                 >
-                  <TextInput
-                    ref={partInputRef}
-                    style={[
-                      styles.partInput,
-                      {
-                        color: uiTextColor,
-                      },
-                    ]}
-                    value={partInputValue}
-                    onChangeText={(value) => {
-                      const digitsOnly = String(value || "").replace(/[^0-9]/g, "");
-                      setPartInputValue(digitsOnly);
-                    }}
-                    onSubmitEditing={commitManualPartInput}
-                    onBlur={commitManualPartInput}
-                    keyboardType="number-pad"
-                    returnKeyType="done"
-                    maxLength={Math.max(2, String(segments.length).length)}
-                    selectTextOnFocus
-                  />
-                  <Text style={[styles.partCounterSlash, { color: uiTextColor }]}>/</Text>
-                  <Text style={[styles.partCounterTotal, { color: uiTextColor }]}>
-                    {segments.length}
-                  </Text>
+                  {isPartInputEditing ? (
+                    <>
+                      <TextInput
+                        ref={partInputRef}
+                        style={[
+                          styles.partInput,
+                          {
+                            color: uiTextColor,
+                            width: Math.max(16, Math.max(2, String(segments.length).length) * 8),
+                          },
+                        ]}
+                        value={partInputValue}
+                        onChangeText={(value) => {
+                          const digitsOnly = String(value || "").replace(/[^0-9]/g, "");
+                          setPartInputValue(digitsOnly);
+                        }}
+                        onSubmitEditing={commitManualPartInput}
+                        onBlur={commitManualPartInput}
+                        keyboardType="number-pad"
+                        returnKeyType="done"
+                        maxLength={Math.max(2, String(segments.length).length)}
+                        selectTextOnFocus
+                        autoFocus
+                      />
+                      <Text style={[styles.partCounterSlash, { color: uiTextColor }]}>/</Text>
+                      <Text style={[styles.partCounterTotal, { color: uiTextColor }]}>
+                        {segments.length}
+                      </Text>
+                    </>
+                  ) : (
+                    <TouchableOpacity
+                      style={styles.partCounterDisplayButton}
+                      onPress={startManualPartInput}
+                      disabled={isSegmentLoading}
+                      accessibilityLabel="Type part number"
+                    >
+                      <Text style={[styles.partCounterCurrent, { color: uiTextColor }]}>
+                        {currentSegmentIndex + 1}
+                      </Text>
+                      <Text style={[styles.partCounterSlash, { color: uiTextColor }]}>/</Text>
+                      <Text style={[styles.partCounterTotal, { color: uiTextColor }]}>
+                        {segments.length}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
                 <TouchableOpacity
                   style={[styles.inlineArrowButton, styles.partNavArrowButton]}
@@ -2235,7 +2356,8 @@ export default function ReaderScreen({ route, navigation }) {
             value={editDraftText}
             onChangeText={setEditDraftText}
             textAlignVertical="top"
-            selectionColor={uiTextColor}
+            selectionColor={editSelectionColor}
+            cursorColor={readerTextColor}
             autoCorrect={false}
             autoCapitalize="sentences"
             scrollEnabled={true}
@@ -2490,8 +2612,8 @@ export default function ReaderScreen({ route, navigation }) {
         onRequestClose={() => {
           setShowQuickSettings(false);
           setSettingsTab("fonts");
-          setShowAllVoices(false);
           setShowVoiceSection(false);
+          setShowVoiceHelp(false);
         }}
       >
         <View style={styles.quickSettingsOverlay}>
@@ -2500,8 +2622,8 @@ export default function ReaderScreen({ route, navigation }) {
             onPress={() => {
               setShowQuickSettings(false);
               setSettingsTab("fonts");
-              setShowAllVoices(false);
               setShowVoiceSection(false);
+              setShowVoiceHelp(false);
             }}
           />
           <View
@@ -2522,8 +2644,8 @@ export default function ReaderScreen({ route, navigation }) {
                 onPress={() => {
                   setShowQuickSettings(false);
                   setSettingsTab("fonts");
-                  setShowAllVoices(false);
                   setShowVoiceSection(false);
+                  setShowVoiceHelp(false);
                 }}
               >
                 <MaterialIcons name="close" size={20} color={uiTextColor} />
@@ -2663,230 +2785,117 @@ export default function ReaderScreen({ route, navigation }) {
                     />
                   </TouchableOpacity>
                   {showVoiceSection && (
-                    <>
-                      <Text style={[styles.voiceSectionLabel, { color: uiTextColor }]}>
-                        Recommended
-                      </Text>
-                      <View style={styles.quickChipRow}>
-                        <View style={styles.voiceChoice}>
-                          <TouchableOpacity
-                            style={[
-                              styles.quickChip,
-                              styles.voiceChip,
-                              !ttsVoiceName && { backgroundColor: uiTextColor },
-                              { borderColor: theme.border },
-                            ]}
-                            onPress={() => setTtsVoiceName("")}
-                          >
-                            <Text
-                              numberOfLines={1}
-                              style={[
-                                styles.quickChipText,
-                                styles.voiceChipText,
-                                { color: !ttsVoiceName ? theme.background : uiTextColor },
-                              ]}
-                            >
-                              Default
-                            </Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[
-                              styles.voicePreviewButton,
-                              { borderColor: theme.border },
-                              previewVoiceName === "default" && {
-                                backgroundColor: uiTextColor,
-                              },
-                            ]}
-                            onPress={() => previewVoice("")}
-                            accessibilityLabel="Preview default voice"
-                          >
-                            <MaterialIcons
-                              name="volume-up"
-                              size={14}
-                              color={
-                                previewVoiceName === "default"
-                                  ? theme.background
-                                  : uiTextColor
-                              }
-                            />
-                          </TouchableOpacity>
-                        </View>
-                        {recommendedVoices.map((voice) => {
-                          const voiceName = voice.name;
-                          const shortLabel = voice.label;
-                          const isActive = ttsVoiceName === voiceName;
-                          return (
-                            <View key={voiceName} style={styles.voiceChoice}>
-                              <TouchableOpacity
-                                style={[
-                                  styles.quickChip,
-                                  styles.voiceChip,
-                                  isActive && { backgroundColor: uiTextColor },
-                                  { borderColor: theme.border },
-                                ]}
-                                onPress={() => setTtsVoiceName(voiceName)}
-                              >
-                                <Text
-                                  numberOfLines={1}
-                                  style={[
-                                    styles.quickChipText,
-                                    styles.voiceChipText,
-                                    { color: isActive ? theme.background : uiTextColor },
-                                  ]}
-                                >
-                                  {shortLabel}
-                                </Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity
-                                style={[
-                                  styles.voicePreviewButton,
-                                  { borderColor: theme.border },
-                                  previewVoiceName === voiceName && {
-                                    backgroundColor: uiTextColor,
-                                  },
-                                ]}
-                                onPress={() => previewVoice(voiceName)}
-                                accessibilityLabel={`Preview ${shortLabel} voice`}
-                              >
-                                <MaterialIcons
-                                  name="volume-up"
-                                  size={14}
-                                  color={
-                                    previewVoiceName === voiceName
-                                      ? theme.background
-                                      : uiTextColor
-                                  }
-                                />
-                              </TouchableOpacity>
-                            </View>
-                          );
-                        })}
-                      </View>
-                      {allVoices.length > recommendedVoices.length && (
-                        <TouchableOpacity
-                          style={[
-                            styles.voiceToggleButton,
-                            { borderColor: uiTextColor, backgroundColor: uiTextColor },
-                          ]}
-                          onPress={() => setShowAllVoices((prev) => !prev)}
-                        >
-                          <MaterialIcons
-                            name={showAllVoices ? "expand-less" : "expand-more"}
-                            size={14}
-                            color={theme.background}
-                          />
-                          <Text style={[styles.voiceToggleText, { color: theme.background }]}>
-                            {showAllVoices
-                              ? "Hide full voice list"
-                              : `Show all voices (${allVoices.length})`}
-                          </Text>
-                        </TouchableOpacity>
-                      )}
-                      {showAllVoices && extraVoices.length > 0 && (
-                        <>
+                    <View
+                      style={[
+                        styles.voiceListContainer,
+                        {
+                          borderColor: isDarkBackground
+                            ? "rgba(255,255,255,0.24)"
+                            : "rgba(0,0,0,0.15)",
+                          backgroundColor:
+                            theme.background === "#16171A"
+                              ? "rgba(255,255,255,0.05)"
+                              : "rgba(0,0,0,0.022)",
+                        },
+                      ]}
+                    >
+                      <View style={styles.voiceListContent}>
+                        <View style={styles.voicePagerRow}>
                           <Text style={[styles.voiceSectionLabel, { color: uiTextColor }]}>
-                            All voices
+                            Voice Packs
                           </Text>
-                          <View style={styles.quickChipRow}>
-                            {extraVoices.map((voice) => {
-                              const voiceName = voice.name;
-                              const shortLabel = voice.label;
-                              const isActive = ttsVoiceName === voiceName;
-                              return (
-                                <View key={voiceName} style={styles.voiceChoice}>
-                                  <TouchableOpacity
-                                    style={[
-                                      styles.quickChip,
-                                      styles.voiceChip,
-                                      isActive && { backgroundColor: uiTextColor },
-                                      { borderColor: theme.border },
-                                    ]}
-                                    onPress={() => setTtsVoiceName(voiceName)}
-                                  >
-                                    <Text
-                                      numberOfLines={1}
-                                      style={[
-                                        styles.quickChipText,
-                                        styles.voiceChipText,
-                                        { color: isActive ? theme.background : uiTextColor },
-                                      ]}
-                                    >
-                                      {shortLabel}
-                                    </Text>
-                                  </TouchableOpacity>
-                                  <TouchableOpacity
-                                    style={[
-                                      styles.voicePreviewButton,
-                                      { borderColor: theme.border },
-                                      previewVoiceName === voiceName && {
-                                        backgroundColor: uiTextColor,
-                                      },
-                                    ]}
-                                    onPress={() => previewVoice(voiceName)}
-                                    accessibilityLabel={`Preview ${shortLabel} voice`}
-                                  >
-                                    <MaterialIcons
-                                      name="volume-up"
-                                      size={14}
-                                      color={
-                                        previewVoiceName === voiceName
-                                          ? theme.background
-                                          : uiTextColor
-                                      }
-                                    />
-                                  </TouchableOpacity>
-                                </View>
-                              );
-                            })}
+                          <View style={styles.voicePagerControls}>
+                            <TouchableOpacity
+                              style={[
+                                styles.voicePagerButton,
+                                voicePageIndex <= 0 && styles.disabledButton,
+                                { borderColor: theme.border },
+                              ]}
+                              onPress={() =>
+                                setVoicePageIndex((prev) => Math.max(0, prev - 1))
+                              }
+                              disabled={voicePageIndex <= 0}
+                              accessibilityLabel="Previous voice page"
+                            >
+                              <MaterialIcons name="chevron-left" size={16} color={uiTextColor} />
+                            </TouchableOpacity>
+                            <Text style={[styles.voicePagerText, { color: uiTextColor }]}>
+                              {`${voicePageIndex + 1}/${totalVoicePages}`}
+                            </Text>
+                            <TouchableOpacity
+                              style={[
+                                styles.voicePagerButton,
+                                voicePageIndex >= totalVoicePages - 1 && styles.disabledButton,
+                                { borderColor: theme.border },
+                              ]}
+                              onPress={() =>
+                                setVoicePageIndex((prev) =>
+                                  Math.min(totalVoicePages - 1, prev + 1)
+                                )
+                              }
+                              disabled={voicePageIndex >= totalVoicePages - 1}
+                              accessibilityLabel="Next voice page"
+                            >
+                              <MaterialIcons name="chevron-right" size={16} color={uiTextColor} />
+                            </TouchableOpacity>
                           </View>
-                        </>
-                      )}
-                      <View
-                        style={[
-                          styles.quickHelpBox,
-                          {
-                            borderColor: theme.border,
-                            backgroundColor:
-                              theme.background === "#16171A"
-                                ? "rgba(255,255,255,0.05)"
-                                : "rgba(0,0,0,0.03)",
-                          },
-                        ]}
-                      >
-                        <Text style={[styles.quickHelpTitle, { color: uiTextColor }]}>
-                          How to add more voices
-                        </Text>
-                        <Text style={[styles.quickHelpText, { color: uiTextColor }]}>
-                          1. Open phone Settings.
-                        </Text>
-                        <Text style={[styles.quickHelpText, { color: uiTextColor }]}>
-                          2. Tap Text-to-speech output.
-                        </Text>
-                        <Text style={[styles.quickHelpText, { color: uiTextColor }]}>
-                          3. Download a new voice.
-                        </Text>
-                        <Text style={[styles.quickHelpText, { color: uiTextColor }]}>
-                          4. Come back and reopen this app.
-                        </Text>
-                        <TouchableOpacity
-                          style={[
-                            styles.voiceSettingsBtn,
-                            { borderColor: theme.border, backgroundColor: theme.highlight },
-                          ]}
-                          onPress={openVoiceSettings}
-                        >
-                          <MaterialIcons name="settings" size={14} color={uiTextColor} />
-                          <Text style={[styles.voiceSettingsBtnText, { color: uiTextColor }]}>
-                            Open voice settings
-                          </Text>
-                        </TouchableOpacity>
-                        {availableVoices.length <= 1 && (
-                          <Text style={[styles.quickHelpNote, { color: uiTextColor }]}>
-                            You currently have 1 voice on this phone.
-                          </Text>
-                        )}
+                        </View>
+                        <View style={styles.quickChipRow}>
+                          {visibleVoiceOptions.map((voice) => {
+                            const voiceName = voice.name;
+                            const shortLabel = voice.label;
+                            const isDefault = !voiceName;
+                            const isActive = isDefault ? !ttsVoiceName : ttsVoiceName === voiceName;
+                            const previewId = isDefault ? "default" : voiceName;
+                            return (
+                              <View key={isDefault ? "default" : voiceName} style={styles.voiceChoice}>
+                                <TouchableOpacity
+                                  style={[
+                                    styles.quickChip,
+                                    styles.voiceChip,
+                                    isActive && { backgroundColor: uiTextColor },
+                                    { borderColor: theme.border },
+                                  ]}
+                                  onPress={() => setTtsVoiceName(voiceName)}
+                                >
+                                  <Text
+                                    numberOfLines={1}
+                                    style={[
+                                      styles.quickChipText,
+                                      styles.voiceChipText,
+                                      { color: isActive ? theme.background : uiTextColor },
+                                    ]}
+                                  >
+                                    {shortLabel}
+                                  </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                  style={[
+                                    styles.voicePreviewButton,
+                                    { borderColor: theme.border },
+                                    previewVoiceName === previewId && {
+                                      backgroundColor: uiTextColor,
+                                    },
+                                  ]}
+                                  onPress={() => previewVoice(voiceName)}
+                                  accessibilityLabel={`Preview ${shortLabel} voice`}
+                                >
+                                  <MaterialIcons
+                                    name="volume-up"
+                                    size={14}
+                                    color={
+                                      previewVoiceName === previewId
+                                        ? theme.background
+                                        : uiTextColor
+                                    }
+                                  />
+                                </TouchableOpacity>
+                              </View>
+                            );
+                          })}
+                        </View>
                       </View>
-                    </>
+                    </View>
                   )}
                   <View style={styles.quickRow}>
                     <View style={styles.quickRowHeader}>
@@ -2921,6 +2930,62 @@ export default function ReaderScreen({ route, navigation }) {
                         </TouchableOpacity>
                       </View>
                     </View>
+                  </View>
+                  <View style={styles.quickRow}>
+                    <TouchableOpacity
+                      style={[
+                        styles.voiceHelpToggle,
+                        { borderColor: theme.border, backgroundColor: theme.highlight },
+                      ]}
+                      onPress={() => setShowVoiceHelp((prev) => !prev)}
+                    >
+                      <Text style={[styles.voiceHelpToggleText, { color: uiTextColor }]}>
+                        Need more voices? Tap for setup steps
+                      </Text>
+                      <MaterialIcons
+                        name={showVoiceHelp ? "expand-less" : "expand-more"}
+                        size={16}
+                        color={uiTextColor}
+                      />
+                    </TouchableOpacity>
+                    {showVoiceHelp && (
+                      <View
+                        style={[
+                          styles.quickHelpBox,
+                          styles.quickHelpCompact,
+                          {
+                            borderColor: theme.border,
+                            backgroundColor:
+                              theme.background === "#16171A"
+                                ? "rgba(255,255,255,0.05)"
+                                : "rgba(0,0,0,0.03)",
+                          },
+                        ]}
+                      >
+                        <Text style={[styles.quickHelpText, { color: uiTextColor }]}>
+                          {
+                            "Open phone Settings -> Text-to-speech output -> download a voice, then come back to the app."
+                          }
+                        </Text>
+                        <TouchableOpacity
+                          style={[
+                            styles.voiceSettingsBtn,
+                            { borderColor: theme.border, backgroundColor: theme.highlight },
+                          ]}
+                          onPress={openVoiceSettings}
+                        >
+                          <MaterialIcons name="settings" size={14} color={uiTextColor} />
+                          <Text style={[styles.voiceSettingsBtnText, { color: uiTextColor }]}>
+                            Open voice settings
+                          </Text>
+                        </TouchableOpacity>
+                        {availableVoices.length <= 1 && (
+                          <Text style={[styles.quickHelpNote, { color: uiTextColor }]}>
+                            You currently have 1 voice on this phone.
+                          </Text>
+                        )}
+                      </View>
+                    )}
                   </View>
                 </View>
               )}
@@ -3083,6 +3148,87 @@ export default function ReaderScreen({ route, navigation }) {
 
                   {settingsTab === "colors" && (
                     <View style={styles.quickRow}>
+                      <Text style={[styles.quickLabel, { color: uiTextColor }]}>
+                        Color Theme
+                      </Text>
+                      <View style={styles.quickThemeGrid}>
+                        {COLOR_PRESETS.map((preset) => {
+                          const isCustomActive = colorMode === "custom";
+                          const isActive =
+                            colorMode === "preset" && colorPresetId === preset.id;
+                          const chipBg = hsvToHex(
+                            preset.readingArea.hue,
+                            preset.readingArea.saturation,
+                            preset.readingArea.value
+                          );
+                          const chipTextRgb = hexToRgb(chipBg);
+                          const chipTextColor =
+                            getRelativeLuminance(chipTextRgb) < 0.45
+                              ? "#FFFFFF"
+                              : "#111111";
+                          return (
+                            <TouchableOpacity
+                              key={preset.id}
+                              style={[
+                                styles.quickChip,
+                                styles.quickThemeGridItem,
+                                styles.quickThemeChip,
+                                isActive && styles.quickThemeChipActive,
+                                {
+                                  backgroundColor: chipBg,
+                                  borderColor: isActive ? uiTextColor : theme.border,
+                                  opacity: isCustomActive ? 0.72 : 1,
+                                },
+                              ]}
+                              onPress={() => applyColorPreset(preset.id)}
+                            >
+                              <Text
+                                style={[
+                                  styles.quickChipText,
+                                  styles.quickThemeChipText,
+                                  { color: chipTextColor },
+                                ]}
+                              >
+                                {preset.label}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                        <TouchableOpacity
+                          style={[
+                            styles.quickChip,
+                            styles.quickThemeGridItem,
+                            styles.quickThemeChip,
+                            colorMode === "custom" && styles.quickThemeChipActive,
+                            colorMode === "custom" && {
+                              backgroundColor: uiTextColor,
+                              borderColor: uiTextColor,
+                            },
+                            { borderColor: theme.border },
+                          ]}
+                          onPress={() => setColorMode("custom")}
+                        >
+                          <Text
+                            style={[
+                              styles.quickChipText,
+                              styles.quickThemeChipText,
+                              {
+                                color:
+                                  colorMode === "custom"
+                                    ? theme.background
+                                    : uiTextColor,
+                              },
+                            ]}
+                          >
+                            Custom
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+
+                  {settingsTab === "colors" && colorMode === "custom" && (
+                    <View style={styles.quickRow}>
                       <View
                         style={[
                           styles.colorTargetSegmented,
@@ -3124,7 +3270,7 @@ export default function ReaderScreen({ route, navigation }) {
                     </View>
                   )}
 
-                  {settingsTab === "colors" && (
+                  {settingsTab === "colors" && colorMode === "custom" && (
                     <View style={styles.quickRow}>
                       <View
                         style={styles.shadePanel}
@@ -3204,237 +3350,6 @@ export default function ReaderScreen({ route, navigation }) {
           </View>
         </View>
       </Modal>
-      <Modal
-        visible={showSaveFolderPicker}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
-          setShowSaveFolderPicker(false);
-          setShowSaveNewFolderInput(false);
-          setSaveFolderInput("");
-          setSaveTitleInput("");
-        }}
-      >
-        <View style={styles.partNavigatorOverlay}>
-          <Pressable
-            style={styles.partNavigatorBackdrop}
-            onPress={() => {
-              setShowSaveFolderPicker(false);
-              setShowSaveNewFolderInput(false);
-              setSaveFolderInput("");
-              setSaveTitleInput("");
-            }}
-          />
-          <View
-            style={[
-              styles.partNavigatorPanel,
-              {
-                borderColor: theme.border,
-                backgroundColor:
-                  isDarkBackground ? "#1C1C1C" : theme.highlight,
-              },
-            ]}
-          >
-            <View style={styles.partNavigatorHeader}>
-              <Text style={[styles.partNavigatorTitle, { color: uiTextColor }]}>
-                Save To Folder
-              </Text>
-              <TouchableOpacity
-                onPress={() => {
-                  setShowSaveFolderPicker(false);
-                  setShowSaveNewFolderInput(false);
-                  setSaveFolderInput("");
-                  setSaveTitleInput("");
-                }}
-              >
-                <MaterialIcons name="close" size={20} color={uiTextColor} />
-              </TouchableOpacity>
-            </View>
-            <Text style={[styles.partNavigatorSubtitle, { color: uiTextColor }]}>
-              Choose a folder, or save to root.
-            </Text>
-
-            <TextInput
-              style={[
-                styles.saveFolderInput,
-                {
-                  color: uiTextColor,
-                  borderColor: theme.border,
-                  backgroundColor:
-                    isDarkBackground
-                      ? "rgba(255,255,255,0.06)"
-                      : "rgba(0,0,0,0.04)",
-                },
-              ]}
-              value={saveTitleInput}
-              onChangeText={setSaveTitleInput}
-              placeholder="File name"
-              placeholderTextColor={isDarkBackground ? "#8F9499" : "#8A8A8A"}
-              editable={!isSaving}
-            />
-
-            <View style={styles.saveFolderTopActions}>
-              <TouchableOpacity
-                style={[
-                  styles.saveFolderNewBtn,
-                  {
-                    borderColor: theme.border,
-                    backgroundColor:
-                      isDarkBackground
-                        ? "rgba(255,255,255,0.06)"
-                        : "rgba(0,0,0,0.04)",
-                  },
-                ]}
-                onPress={() => {
-                  setShowSaveNewFolderInput((prev) => {
-                    const next = !prev;
-                    if (next) {
-                      setSelectedSaveFolder("");
-                      setSaveFolderInput("");
-                    }
-                    return next;
-                  });
-                }}
-                disabled={isSaving}
-              >
-                <MaterialIcons name="create-new-folder" size={16} color={uiTextColor} />
-                <Text style={[styles.saveFolderNewBtnText, { color: uiTextColor }]}>
-                  {showSaveNewFolderInput ? "Close" : "New Folder"}
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            {showSaveNewFolderInput && (
-              <TextInput
-                style={[
-                  styles.saveFolderInput,
-                  {
-                    color: uiTextColor,
-                    borderColor: theme.border,
-                    backgroundColor:
-                      isDarkBackground
-                        ? "rgba(255,255,255,0.06)"
-                        : "rgba(0,0,0,0.04)",
-                  },
-                ]}
-                value={saveFolderInput}
-                onChangeText={(value) => {
-                  setSaveFolderInput(value);
-                  setSelectedSaveFolder("");
-                }}
-                placeholder="Enter folder name"
-                placeholderTextColor={isDarkBackground ? "#8F9499" : "#8A8A8A"}
-                editable={!isSaving}
-              />
-            )}
-
-            {isSaveFolderLoading ? (
-              <View style={styles.saveFolderLoadingRow}>
-                <ActivityIndicator size="small" color={uiTextColor} />
-                <Text style={[styles.saveFolderLoadingText, { color: uiTextColor }]}>
-                  Loading folders...
-                </Text>
-              </View>
-            ) : (
-              <ScrollView
-                style={styles.saveFolderList}
-                contentContainerStyle={styles.saveFolderListWrap}
-                keyboardShouldPersistTaps="handled"
-              >
-                <TouchableOpacity
-                  style={[
-                    styles.saveFolderListItem,
-                    {
-                      borderColor:
-                        selectedSaveFolder === "" ? uiTextColor : theme.border,
-                      backgroundColor:
-                        selectedSaveFolder === ""
-                          ? isDarkBackground
-                            ? "rgba(255,255,255,0.14)"
-                            : "rgba(0,0,0,0.08)"
-                          : "transparent",
-                    },
-                  ]}
-                  onPress={() => {
-                    setSelectedSaveFolder("");
-                    setShowSaveNewFolderInput(false);
-                  }}
-                >
-                  <View style={styles.saveFolderListLeft}>
-                    <MaterialIcons name="home" size={16} color={uiTextColor} />
-                    <Text style={[styles.saveFolderListName, { color: uiTextColor }]}>
-                      Root
-                    </Text>
-                  </View>
-                  {selectedSaveFolder === "" && (
-                    <MaterialIcons name="check" size={18} color={uiTextColor} />
-                  )}
-                </TouchableOpacity>
-
-                {saveFolderOptions.map((folderName) => (
-                  <TouchableOpacity
-                    key={folderName}
-                    style={[
-                      styles.saveFolderListItem,
-                      {
-                        borderColor:
-                          selectedSaveFolder === folderName
-                            ? uiTextColor
-                            : theme.border,
-                        backgroundColor:
-                          selectedSaveFolder === folderName
-                            ? isDarkBackground
-                              ? "rgba(255,255,255,0.14)"
-                              : "rgba(0,0,0,0.08)"
-                            : "transparent",
-                      },
-                    ]}
-                    onPress={() => {
-                      setSelectedSaveFolder(folderName);
-                      setShowSaveNewFolderInput(false);
-                    }}
-                  >
-                    <View style={styles.saveFolderListLeft}>
-                      <MaterialIcons name="folder" size={16} color={uiTextColor} />
-                      <Text
-                        style={[styles.saveFolderListName, { color: uiTextColor }]}
-                        numberOfLines={1}
-                      >
-                        {folderName}
-                      </Text>
-                    </View>
-                    {selectedSaveFolder === folderName && (
-                      <MaterialIcons name="check" size={18} color={uiTextColor} />
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            )}
-
-            <TouchableOpacity
-              style={[
-                styles.saveFolderConfirmButton,
-                {
-                  borderColor: uiTextColor,
-                  backgroundColor: uiTextColor,
-                },
-              ]}
-              onPress={handleSave}
-              disabled={isSaving}
-            >
-              <Text
-                style={[
-                  styles.saveFolderConfirmText,
-                  { color: theme.background },
-                ]}
-              >
-                Save
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
       {!isFullScreen && !isEditMode && (
         <ReaderControls
           isPlaying={isPlaying}
@@ -3688,17 +3603,29 @@ const styles = StyleSheet.create({
     minWidth: 0,
     paddingHorizontal: 3,
   },
+  partCounterDisplayButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 20,
+    paddingHorizontal: 1,
+  },
   partInput: {
-    minWidth: 12,
-    maxWidth: 18,
+    minWidth: 16,
     borderWidth: 0,
     paddingHorizontal: 0,
     paddingVertical: 0,
-    textAlign: "right",
+    textAlign: "center",
     fontSize: 11,
     fontWeight: "700",
     includeFontPadding: false,
     lineHeight: 16,
+  },
+  partCounterCurrent: {
+    fontSize: 11,
+    fontWeight: "700",
+    lineHeight: 16,
+    includeFontPadding: false,
   },
   partCounterSlash: {
     fontSize: 11,
@@ -3750,79 +3677,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     opacity: 0.85,
     marginTop: 2,
-  },
-  saveFolderLoadingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingVertical: 4,
-  },
-  saveFolderLoadingText: {
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  saveFolderTopActions: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-  },
-  saveFolderNewBtn: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  saveFolderNewBtnText: {
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  saveFolderInput: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  saveFolderList: {
-    maxHeight: 220,
-  },
-  saveFolderListWrap: {
-    gap: 8,
-  },
-  saveFolderListItem: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  saveFolderListLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    flex: 1,
-    minWidth: 0,
-  },
-  saveFolderListName: {
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  saveFolderConfirmButton: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 4,
-  },
-  saveFolderConfirmText: {
-    fontSize: 14,
-    fontWeight: "800",
   },
   themeButton: {
     width: 30,
@@ -3938,6 +3792,11 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     gap: 2,
   },
+  quickHelpCompact: {
+    marginTop: 6,
+    paddingVertical: 7,
+    gap: 4,
+  },
   quickHelpTitle: {
     fontSize: 12,
     fontWeight: "700",
@@ -3995,17 +3854,54 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     opacity: 0.78,
   },
-  voiceToggleButton: {
-    alignSelf: "flex-start",
+  voiceListContainer: {
     borderWidth: 1,
-    borderRadius: 8,
+    borderRadius: 10,
+    overflow: "hidden",
+    marginBottom: 6,
+  },
+  voiceListContent: {
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    paddingBottom: 10,
+    gap: 8,
+  },
+  voicePagerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  voicePagerControls: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
   },
-  voiceToggleText: {
+  voicePagerButton: {
+    width: 24,
+    height: 24,
+    borderWidth: 1,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  voicePagerText: {
+    minWidth: 34,
+    textAlign: "center",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  voiceHelpToggle: {
+    borderWidth: 1,
+    borderRadius: 9,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  voiceHelpToggleText: {
+    flex: 1,
     fontSize: 11,
     fontWeight: "700",
   },
@@ -4105,6 +4001,17 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 8,
   },
+  quickThemeGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  quickThemeGridItem: {
+    flexBasis: "31.5%",
+    maxWidth: "31.5%",
+    flexGrow: 0,
+    flexShrink: 0,
+  },
   quickChip: {
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -4113,6 +4020,19 @@ const styles = StyleSheet.create({
     minHeight: 28,
     justifyContent: "center",
     alignItems: "center",
+  },
+  quickThemeChip: {
+    minHeight: 32,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    borderWidth: 1.5,
+  },
+  quickThemeChipActive: {
+    borderWidth: 2.5,
+  },
+  quickThemeChipText: {
+    fontWeight: "700",
+    textAlign: "center",
   },
   quickChipText: {
     fontSize: 12,
