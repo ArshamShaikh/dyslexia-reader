@@ -1,6 +1,85 @@
+import { Storage } from "@google-cloud/storage";
 import vision from "@google-cloud/vision";
+import { randomUUID } from "node:crypto";
 
 const client = new vision.ImageAnnotatorClient();
+const storage = new Storage();
+
+const PDF_OCR_INPUT_BUCKET = String(process.env.GOOGLE_VISION_PDF_INPUT_BUCKET || "").trim();
+const PDF_OCR_OUTPUT_BUCKET = String(process.env.GOOGLE_VISION_PDF_OUTPUT_BUCKET || "").trim();
+const PDF_OCR_OUTPUT_PREFIX = String(
+  process.env.GOOGLE_VISION_PDF_OUTPUT_PREFIX || "vision-pdf-ocr"
+).trim();
+const PDF_OCR_BATCH_SIZE = Math.max(
+  1,
+  Math.min(20, Number.parseInt(process.env.GOOGLE_VISION_PDF_BATCH_SIZE || "5", 10) || 5)
+);
+const PDF_OCR_CLEANUP = process.env.GOOGLE_VISION_PDF_CLEANUP !== "false";
+
+const normalizePrefix = (prefix = "") =>
+  String(prefix || "")
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "");
+
+const joinStoragePath = (...parts) =>
+  parts
+    .map((part) => String(part || "").replace(/^\/+|\/+$/g, ""))
+    .filter(Boolean)
+    .join("/");
+
+const createGsUri = (bucket, objectPath) => `gs://${bucket}/${objectPath}`;
+
+function pageRangeStartFromName(name = "") {
+  const match = String(name).match(/-(\d+)-to-(\d+)\.json$/i);
+  if (!match) return Number.POSITIVE_INFINITY;
+  return Number.parseInt(match[1], 10);
+}
+
+async function readOcrOutputText(bucketName, prefix) {
+  const [files] = await storage.bucket(bucketName).getFiles({ prefix });
+  const jsonFiles = files
+    .filter((file) => String(file.name || "").toLowerCase().endsWith(".json"))
+    .sort((a, b) => {
+      const aPage = pageRangeStartFromName(a.name);
+      const bPage = pageRangeStartFromName(b.name);
+      if (aPage !== bPage) return aPage - bPage;
+      return String(a.name || "").localeCompare(String(b.name || ""));
+    });
+
+  const chunks = [];
+  for (const file of jsonFiles) {
+    const [buffer] = await file.download();
+    let parsed;
+    try {
+      parsed = JSON.parse(buffer.toString("utf8"));
+    } catch {
+      continue;
+    }
+    const responses = Array.isArray(parsed?.responses) ? parsed.responses : [];
+    for (const item of responses) {
+      const text =
+        item?.fullTextAnnotation?.text ||
+        (Array.isArray(item?.textAnnotations) ? item.textAnnotations[0]?.description : "");
+      const clean = String(text || "").trim();
+      if (clean) chunks.push(clean);
+    }
+  }
+  return chunks.join("\n\n").trim();
+}
+
+async function deleteByPrefix(bucketName, prefix) {
+  try {
+    const [files] = await storage.bucket(bucketName).getFiles({ prefix });
+    if (!files.length) return;
+    await Promise.allSettled(files.map((file) => file.delete()));
+  } catch {
+    // Best-effort cleanup only.
+  }
+}
+
+export function isPdfOcrFallbackConfigured() {
+  return Boolean(PDF_OCR_INPUT_BUCKET && PDF_OCR_OUTPUT_BUCKET);
+}
 
 function getWordText(word = {}) {
   return (word.symbols || []).map((s) => s.text || "").join("").trim();
@@ -134,10 +213,63 @@ export async function extractTextFromImage(buffer) {
 }
 
 export async function extractTextFromPdf(buffer) {
-  // NOTE: For PDFs, the recommended approach is the async batch API.
-  // This is a simple placeholder to keep the pipeline consistent.
-  // We'll replace with asyncBatchAnnotateFiles in the next step.
-  const [result] = await client.textDetection({ image: { content: buffer } });
-  const detections = result?.textAnnotations || [];
-  return detections[0]?.description?.trim() || "";
+  if (!isPdfOcrFallbackConfigured()) {
+    throw new Error(
+      "PDF OCR fallback not configured. Set GOOGLE_VISION_PDF_INPUT_BUCKET and GOOGLE_VISION_PDF_OUTPUT_BUCKET."
+    );
+  }
+  if (!buffer || !buffer.length) return "";
+
+  const jobId = `${Date.now()}-${randomUUID()}`;
+  const inputObjectPath = joinStoragePath("pdf-ocr-input", `${jobId}.pdf`);
+  const outputPrefix = joinStoragePath(
+    normalizePrefix(PDF_OCR_OUTPUT_PREFIX),
+    "jobs",
+    jobId
+  );
+  const outputDestination = `${createGsUri(PDF_OCR_OUTPUT_BUCKET, outputPrefix)}/`;
+  const inputUri = createGsUri(PDF_OCR_INPUT_BUCKET, inputObjectPath);
+
+  await storage
+    .bucket(PDF_OCR_INPUT_BUCKET)
+    .file(inputObjectPath)
+    .save(buffer, {
+      resumable: false,
+      contentType: "application/pdf",
+      validation: false,
+    });
+
+  try {
+    const request = {
+      requests: [
+        {
+          inputConfig: {
+            gcsSource: { uri: inputUri },
+            mimeType: "application/pdf",
+          },
+          features: [{ type: "DOCUMENT_TEXT_DETECTION" }],
+          outputConfig: {
+            gcsDestination: { uri: outputDestination },
+            batchSize: PDF_OCR_BATCH_SIZE,
+          },
+        },
+      ],
+    };
+
+    const [operation] = await client.asyncBatchAnnotateFiles(request);
+    await operation.promise();
+    const text = await readOcrOutputText(PDF_OCR_OUTPUT_BUCKET, outputPrefix);
+    return text;
+  } finally {
+    if (PDF_OCR_CLEANUP) {
+      await Promise.allSettled([
+        storage
+          .bucket(PDF_OCR_INPUT_BUCKET)
+          .file(inputObjectPath)
+          .delete()
+          .catch(() => {}),
+        deleteByPrefix(PDF_OCR_OUTPUT_BUCKET, outputPrefix),
+      ]);
+    }
+  }
 }

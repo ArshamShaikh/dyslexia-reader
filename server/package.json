@@ -6,10 +6,13 @@
   "scripts": {
     "dev": "node index.js",
     "start": "node index.js",
-    "test:extraction": "node scripts/validateExtraction.mjs"
+    "test:extraction": "node scripts/validateExtraction.mjs",
+    "test:extraction:strict": "node scripts/validateExtraction.mjs --strict"
   },
   "dependencies": {
+    "@google-cloud/storage": "^7.14.0",
     "@google-cloud/vision": "^4.0.2",
+    "compression": "^1.7.5",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
