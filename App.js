@@ -1,6 +1,7 @@
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import { useEffect } from "react";
 import { StatusBar } from "expo-status-bar";
 import { useFonts } from "expo-font";
 import { MaterialIcons } from "@expo/vector-icons";
@@ -11,6 +12,7 @@ import SavedScreen from "./src/screens/SavedScreen";
 import SettingsScreen from "./src/screens/SettingsScreen";
 import { THEMES } from "./src/theme/colors";
 import { FONT_FAMILY_MAP, isOpenDyslexicUi, uiSizeForFont, uiTrackingForFont } from "./src/theme/typography";
+import { reportClientError } from "./src/services/errorTelemetry";
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -104,6 +106,35 @@ export default function App() {
     "Lexend-SemiBold": require("./assets/lexend/static/Lexend-SemiBold.ttf"),
     "OpenDyslexic-Regular": require("./assets/opendyslexic-0.92/OpenDyslexic-Regular.otf"),
   });
+
+  useEffect(() => {
+    const errorUtils = global?.ErrorUtils;
+    if (
+      !errorUtils ||
+      typeof errorUtils.getGlobalHandler !== "function" ||
+      typeof errorUtils.setGlobalHandler !== "function"
+    ) {
+      return undefined;
+    }
+
+    const defaultHandler = errorUtils.getGlobalHandler();
+    const telemetryHandler = (error, isFatal) => {
+      reportClientError(error, {
+        isFatal: Boolean(isFatal),
+        scope: "global-js-handler",
+      });
+      if (typeof defaultHandler === "function") {
+        defaultHandler(error, isFatal);
+      }
+    };
+
+    errorUtils.setGlobalHandler(telemetryHandler);
+    return () => {
+      if (typeof defaultHandler === "function") {
+        errorUtils.setGlobalHandler(defaultHandler);
+      }
+    };
+  }, []);
 
   if (!fontsLoaded) {
     return null;
