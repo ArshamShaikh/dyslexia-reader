@@ -1,0 +1,9 @@
+{
+  "minCharsFail": 30,
+  "minCharsWarn": 80,
+  "maxSingleWordLineRatioFail": 0.45,
+  "maxSingleWordLineRatioWarn": 0.28,
+  "maxShortLineRatioFail": 0.62,
+  "maxShortLineRatioWarn": 0.42,
+  "minParagraphBreaksWarn": 0
+}

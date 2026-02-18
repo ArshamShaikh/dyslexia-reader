@@ -3,19 +3,36 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { extractTextFromPdf } from "../pdfText.js";
 import { extractTextFromDocx } from "../wordDocx.js";
-import { cleanOcrText } from "../../src/utils/ocrCleaner.js";
+import { cleanOcrText } from "../ocrCleaner.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "..", "..");
 
-const corpusArg = process.argv[2];
+const cliArgs = process.argv.slice(2);
+const strictMode = cliArgs.includes("--strict");
+const corpusArg = cliArgs.find((arg) => !arg.startsWith("--"));
 const corpusDir = path.resolve(
   projectRoot,
   corpusArg || path.join("server", "test-corpus")
 );
+const thresholdConfigPath = path.join(
+  projectRoot,
+  "server",
+  "tests",
+  "extraction-thresholds.json"
+);
 
 const SUPPORTED_EXTENSIONS = new Set([".txt", ".pdf", ".docx"]);
+const DEFAULT_THRESHOLDS = {
+  minCharsFail: 30,
+  minCharsWarn: 80,
+  maxSingleWordLineRatioFail: 0.45,
+  maxSingleWordLineRatioWarn: 0.28,
+  maxShortLineRatioFail: 0.62,
+  maxShortLineRatioWarn: 0.42,
+  minParagraphBreaksWarn: 0,
+};
 
 const normalize = (text = "") => text.replace(/\r\n/g, "\n").trim();
 
@@ -60,7 +77,18 @@ async function readExpectations(filePath) {
   }
 }
 
-function evaluateWithExpectations(cleanedText, metrics, expectations) {
+async function readGlobalThresholds() {
+  try {
+    const raw = await fs.readFile(thresholdConfigPath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return DEFAULT_THRESHOLDS;
+    return { ...DEFAULT_THRESHOLDS, ...parsed };
+  } catch {
+    return DEFAULT_THRESHOLDS;
+  }
+}
+
+function evaluateWithExpectations(cleanedText, metrics, expectations, thresholds) {
   const failures = [];
   const warnings = [];
 
@@ -70,10 +98,50 @@ function evaluateWithExpectations(cleanedText, metrics, expectations) {
   }
 
   if (!expectations) {
-    if (metrics.chars < 40) warnings.push("Very short output (<40 chars).");
-    if (metrics.singleWordLineRatio > 0.28 && metrics.nonEmptyLines > 12) {
+    if (metrics.chars < thresholds.minCharsFail) {
+      failures.push(
+        `Output too short (${metrics.chars} chars). Minimum fail threshold is ${thresholds.minCharsFail}.`
+      );
+    } else if (metrics.chars < thresholds.minCharsWarn) {
+      warnings.push(
+        `Output is short (${metrics.chars} chars). Warn threshold is ${thresholds.minCharsWarn}.`
+      );
+    }
+
+    if (
+      metrics.singleWordLineRatio > thresholds.maxSingleWordLineRatioFail &&
+      metrics.nonEmptyLines > 12
+    ) {
+      failures.push(
+        `Single-word line ratio ${metrics.singleWordLineRatio.toFixed(
+          2
+        )} exceeds fail threshold ${thresholds.maxSingleWordLineRatioFail.toFixed(2)}.`
+      );
+    } else if (
+      metrics.singleWordLineRatio > thresholds.maxSingleWordLineRatioWarn &&
+      metrics.nonEmptyLines > 12
+    ) {
       warnings.push("High single-word line ratio (possible broken wrapping).");
     }
+
+    if (metrics.shortLineRatio > thresholds.maxShortLineRatioFail && metrics.nonEmptyLines > 12) {
+      failures.push(
+        `Short-line ratio ${metrics.shortLineRatio.toFixed(2)} exceeds fail threshold ${thresholds.maxShortLineRatioFail.toFixed(
+          2
+        )}.`
+      );
+    } else if (metrics.shortLineRatio > thresholds.maxShortLineRatioWarn && metrics.nonEmptyLines > 12) {
+      warnings.push(
+        `Short-line ratio ${metrics.shortLineRatio.toFixed(2)} exceeds warn threshold ${thresholds.maxShortLineRatioWarn.toFixed(
+          2
+        )}.`
+      );
+    }
+
+    if (metrics.paragraphBreaks <= thresholds.minParagraphBreaksWarn && metrics.lines > 12) {
+      warnings.push("Very low paragraph breaks; content may be over-merged.");
+    }
+
     return { failures, warnings };
   }
 
@@ -191,10 +259,14 @@ async function main() {
     process.exit(1);
   }
 
+  const thresholds = await readGlobalThresholds();
+
   const reportLines = [];
   reportLines.push(`# Extraction Test Report`);
   reportLines.push(`Corpus: ${corpusDir}`);
   reportLines.push(`Files tested: ${files.length}`);
+  reportLines.push(`Strict mode: ${strictMode ? "ON" : "OFF"}`);
+  reportLines.push(`Threshold config: ${thresholdConfigPath}`);
   reportLines.push("");
 
   let failCount = 0;
@@ -207,7 +279,12 @@ async function main() {
       const cleanedText = cleanOcrText(rawText);
       const metrics = analyzeFormatting(cleanedText);
       const expectations = await readExpectations(filePath);
-      const { failures, warnings } = evaluateWithExpectations(cleanedText, metrics, expectations);
+      const { failures, warnings } = evaluateWithExpectations(
+        cleanedText,
+        metrics,
+        expectations,
+        thresholds
+      );
 
       const status = failures.length ? "FAIL" : warnings.length ? "WARN" : "PASS";
       if (status === "FAIL") failCount += 1;
@@ -246,9 +323,12 @@ async function main() {
 
   console.log(reportLines.join("\n"));
   console.log(`Saved report: ${reportPath}`);
-  console.log(`Summary: ${files.length} files, ${failCount} fail, ${warnCount} warn`);
+  const effectiveFailCount = strictMode ? failCount + warnCount : failCount;
+  console.log(
+    `Summary: ${files.length} files, ${failCount} fail, ${warnCount} warn${strictMode ? " (warnings count as fail in strict mode)" : ""}`
+  );
 
-  process.exit(failCount ? 1 : 0);
+  process.exit(effectiveFailCount ? 1 : 0);
 }
 
 main();
