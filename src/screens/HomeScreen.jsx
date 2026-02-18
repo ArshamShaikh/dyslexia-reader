@@ -3,6 +3,7 @@ import { MaterialIcons } from "@expo/vector-icons";
 import Constants from "expo-constants";
 import { useMemo, useRef, useState } from "react";
 import {
+    NativeModules,
     Platform,
     StyleSheet,
     Text,
@@ -22,12 +23,23 @@ import { cleanOcrText } from "../utils/ocrCleaner";
 import ThemedDialog from "../components/ThemedDialog";
 import { createReaderSession } from "../services/readerSessionService";
 
+const formatExtractionSource = (source = "") => {
+  const normalized = String(source || "").trim().toLowerCase();
+  if (normalized === "pdf-text-layer") return "Text PDF";
+  if (normalized === "pdf-ocr-fallback") return "Scanned PDF OCR";
+  if (normalized === "docx") return "DOCX";
+  if (normalized === "image-ocr" || normalized === "ocr") return "Image OCR";
+  if (normalized === "text-file") return "Text File";
+  return "Imported";
+};
+
 export default function HomeScreen({ navigation }) {
   const [inputText, setInputText] = useState("");
   const [textInputHeight, setTextInputHeight] = useState(120);
   const [isUploading, setIsUploading] = useState(false);
   const [isOpeningReader, setIsOpeningReader] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
+  const [lastExtractionMeta, setLastExtractionMeta] = useState(null);
   const [dialogConfig, setDialogConfig] = useState({
     visible: false,
     title: "",
@@ -35,6 +47,7 @@ export default function HomeScreen({ navigation }) {
     actions: [],
   });
   const dialogResolverRef = useRef(null);
+  const resolvedApiBaseUrlRef = useRef("");
   const { backgroundTheme, uiFontFamily } = useSettings();
   const theme = THEMES[backgroundTheme] || THEMES.light;
   const uiTracking = uiTrackingForFont(uiFontFamily);
@@ -58,24 +71,157 @@ export default function HomeScreen({ navigation }) {
   const statusBannerBg = isDarkTheme ? "#2A2F37" : "#F3F7FC";
   const statusBannerBorder = isDarkTheme ? "#46505E" : "#C8D4E5";
   const statusBannerAccent = isDarkTheme ? "#9BC7FF" : "#2C5EA8";
-  const apiBaseUrl = useMemo(() => {
-    // Prefer localhost for dev builds on real Android devices when using adb reverse.
-    if (Platform.OS === "android" && Constants.appOwnership !== "expo") {
-      return "http://localhost:5050";
-    }
-
+  const apiBaseCandidates = useMemo(() => {
+    const scriptUrl = String(NativeModules?.SourceCode?.scriptURL || "").trim();
+    const scriptUrlHostMatch = scriptUrl.match(/^https?:\/\/([^/:]+)/i);
+    const fromScriptUrl = scriptUrlHostMatch?.[1]
+      ? `http://${scriptUrlHostMatch[1]}:5050`
+      : "";
+    const fromEnv = String(process.env.EXPO_PUBLIC_EXTRACTION_API_BASE_URL || "")
+      .trim()
+      .replace(/\/+$/, "");
+    const fromConfig = String(
+      Constants.expoConfig?.extra?.extractionApiBaseUrl ||
+      Constants.manifest2?.extra?.extractionApiBaseUrl ||
+      ""
+    )
+      .trim()
+      .replace(/\/+$/, "");
+    const linkingUri = String(Constants.linkingUri || "").trim();
+    const linkingHostMatch = linkingUri.match(/^[a-z]+:\/\/([^/:]+)/i);
+    const fromLinkingUri = linkingHostMatch?.[1]
+      ? `http://${linkingHostMatch[1]}:5050`
+      : "";
     const hostUri =
       Constants.expoConfig?.hostUri ||
       Constants.manifest?.debuggerHost ||
       Constants.manifest2?.extra?.expoGo?.debuggerHost;
-    if (hostUri) {
-      const hostname = hostUri.split(":")[0];
-      return `http://${hostname}:5050`;
-    }
-    if (Platform.OS === "android") return "http://10.0.2.2:5050";
-    return "http://localhost:5050";
+    const fromHostUri = hostUri
+      ? `http://${hostUri.split(":")[0]}:5050`
+      : "";
+
+    const options = [
+      fromScriptUrl,
+      fromEnv,
+      fromConfig,
+      fromLinkingUri,
+      fromHostUri,
+      "http://localhost:5050",
+      Platform.OS === "android" ? "http://10.0.2.2:5050" : "",
+    ]
+      .map((value) => String(value || "").trim().replace(/\/+$/, ""))
+      .filter(Boolean);
+
+    return [...new Set(options)];
   }, []);
-  const MAX_OPEN_CHARS = 500000;
+  const isLikelyExtractionConnectionError = (error) => {
+    const message = String(error?.message || "").toLowerCase();
+    return (
+      error?.name === "AbortError" ||
+      message.includes("network request failed") ||
+      message.includes("failed to fetch") ||
+      message.includes("load failed") ||
+      message.includes("connection") ||
+      message.includes("timeout")
+    );
+  };
+  const isRequestTimeoutError = (error) => {
+    const message = String(error?.message || "").toLowerCase();
+    return error?.name === "AbortError" || message.includes("timeout");
+  };
+  const extractionUnavailableMessage =
+    "Couldn't reach text extraction service. You can still use offline mode with typed/pasted text and text files. For OCR/PDF/DOCX, connect to your extraction server.";
+  const apiAccessToken = String(process.env.EXPO_PUBLIC_EXTRACTION_API_TOKEN || "").trim();
+  const withApiAuthHeaders = (baseHeaders = {}) =>
+    apiAccessToken
+      ? {
+          ...baseHeaders,
+          Authorization: `Bearer ${apiAccessToken}`,
+        }
+      : baseHeaders;
+  const fetchWithTimeout = async (url, options = {}, timeoutMs = 2500) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
+  const resolveApiBaseUrl = async () => {
+    if (resolvedApiBaseUrlRef.current) return resolvedApiBaseUrlRef.current;
+    const attempted = [];
+    for (const candidate of apiBaseCandidates) {
+      attempted.push(candidate);
+      try {
+        const response = await fetchWithTimeout(
+          `${candidate}/health`,
+          { method: "GET", headers: withApiAuthHeaders() },
+          1800
+        );
+        if (!response.ok) continue;
+        resolvedApiBaseUrlRef.current = candidate;
+        return candidate;
+      } catch (_error) {
+        // Try next candidate.
+      }
+    }
+    const attemptsText = attempted.length ? ` Tried: ${attempted.join(" | ")}` : "";
+    throw new Error(`${extractionUnavailableMessage}${attemptsText}`);
+  };
+  const MAX_OPEN_CHARS = 1500000;
+  const applyImportedText = async (
+    text,
+    {
+      emptyTitle = "No text found",
+      emptyMessage = "No readable text found.",
+      source = "",
+      truncated = false,
+      maxChars = MAX_OPEN_CHARS,
+    } = {}
+  ) => {
+    const normalized = String(text || "").trim();
+    if (!normalized) {
+      setLastExtractionMeta(null);
+      await showInfo(emptyTitle, emptyMessage);
+      return false;
+    }
+
+    const cap = Math.max(200000, Number(maxChars || MAX_OPEN_CHARS));
+    if (normalized.length > cap) {
+      setInputText(normalized.slice(0, cap));
+      setLastExtractionMeta({
+        source: source || "imported",
+        truncated: true,
+        maxChars: cap,
+      });
+      await showInfo(
+        "Large file opened",
+        `To keep reading smooth on all phones, we loaded the first ${cap.toLocaleString()} characters.`
+      );
+      return true;
+    }
+
+    setInputText(normalized);
+    setLastExtractionMeta({
+      source: source || "imported",
+      truncated: Boolean(truncated),
+      maxChars: cap,
+    });
+    return true;
+  };
+  const extractionMetaText = useMemo(() => {
+    if (!lastExtractionMeta) return "";
+    const base = `Source: ${formatExtractionSource(lastExtractionMeta.source)}`;
+    if (lastExtractionMeta.truncated) {
+      const cap = Number(lastExtractionMeta.maxChars || MAX_OPEN_CHARS);
+      return `${base} • Trimmed to ${cap.toLocaleString()} chars`;
+    }
+    return base;
+  }, [lastExtractionMeta]);
   const openDialog = ({ title, message, actions }) =>
     new Promise((resolve) => {
       dialogResolverRef.current = resolve;
@@ -189,53 +335,59 @@ export default function HomeScreen({ navigation }) {
 
       if (isPdf) {
         setIsUploading(true);
-        setStatusMessage("Uploading PDF...");
-        const text = await uploadAsset("pdf", file);
-        const cleaned = cleanOcrText(text);
-        if (!cleaned) {
-          await showInfo(
-            "No text found",
-            "This PDF looks scanned. OCR for scanned PDFs is coming next."
-          );
-          return;
-        }
-        setInputText(cleaned);
+        setStatusMessage("Processing PDF... scanned files may take a few minutes.");
+        const extracted = await uploadAsset("pdf", file, {
+          onProgress: (message) => setStatusMessage(message),
+        });
+        await applyImportedText(extracted.text, {
+          emptyTitle: "No text found",
+          emptyMessage: "No readable text was found in this PDF.",
+          source: extracted.source,
+          truncated: extracted.truncated,
+          maxChars: extracted.maxChars,
+        });
         return;
       }
 
       if (isDocx) {
         setIsUploading(true);
         setStatusMessage("Uploading document...");
-        const text = await uploadAsset("docx", file);
-        const cleaned = cleanOcrText(text);
-        if (!cleaned) {
-          await showInfo("No text found", "This document might be empty.");
-          return;
-        }
-        setInputText(cleaned);
+        const extracted = await uploadAsset("docx", file, {
+          onProgress: (message) => setStatusMessage(message),
+        });
+        await applyImportedText(extracted.text, {
+          emptyTitle: "No text found",
+          emptyMessage: "This document might be empty.",
+          source: extracted.source,
+          truncated: extracted.truncated,
+          maxChars: extracted.maxChars,
+        });
         return;
       }
 
       if (isImage) {
         setIsUploading(true);
         setStatusMessage("Uploading image for OCR...");
-        const text = await uploadAsset("ocr", file);
-        const cleaned = cleanOcrText(text);
-        if (!cleaned) {
-          await showInfo("No text detected", "Try a clearer image.");
-          return;
-        }
-        setInputText(cleaned);
+        const extracted = await uploadAsset("ocr", file, {
+          onProgress: (message) => setStatusMessage(message),
+        });
+        await applyImportedText(extracted.text, {
+          emptyTitle: "No text detected",
+          emptyMessage: "Try a clearer image.",
+          source: extracted.source,
+          truncated: extracted.truncated,
+          maxChars: extracted.maxChars,
+        });
         return;
       }
 
       if (isTextLike) {
         const content = await readTextFileSafely(file);
-        if (!content) {
-          await showInfo("File is empty", "Please choose a file with text.");
-          return;
-        }
-        setInputText(cleanOcrText(content));
+        await applyImportedText(cleanOcrText(content), {
+          emptyTitle: "File is empty",
+          emptyMessage: "Please choose a file with text.",
+          source: "text-file",
+        });
         return;
       }
 
@@ -251,7 +403,61 @@ export default function HomeScreen({ navigation }) {
     }
   };
 
-  const uploadAsset = async (endpoint, asset) => {
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const pollPdfJobUntilDone = async (
+    apiBaseUrl,
+    jobId,
+    signal,
+    onProgress = () => {}
+  ) => {
+    const startTime = Date.now();
+    const maxWaitMs = 16 * 60 * 1000;
+    const phaseLabel = {
+      queued: "Queued",
+      "running-ocr": "Reading scanned pages",
+      "finalizing-text": "Cleaning extracted text",
+      done: "Done",
+    };
+
+    while (Date.now() - startTime < maxWaitMs) {
+      if (signal?.aborted) {
+        throw new Error("Request timed out. Please retry.");
+      }
+
+      const pollResponse = await fetch(`${apiBaseUrl}/jobs/${encodeURIComponent(jobId)}`, {
+        method: "GET",
+        headers: withApiAuthHeaders(),
+        signal,
+      });
+      if (!pollResponse.ok) {
+        const payload = await pollResponse.json().catch(() => ({}));
+        throw new Error(payload?.error || "OCR job failed while polling.");
+      }
+      const job = await pollResponse.json();
+      if (job?.status === "completed") {
+        return {
+          text: String(job?.text || "").trim(),
+          source: String(job?.source || "pdf-ocr-fallback"),
+          truncated: Boolean(job?.truncated),
+          maxChars: Number(job?.maxChars || 0) || MAX_OPEN_CHARS,
+        };
+      }
+      if (job?.status === "failed") {
+        throw new Error(String(job?.error || "PDF OCR failed."));
+      }
+
+      const progress = Math.max(5, Math.min(98, Number(job?.progress || 0)));
+      const stage = phaseLabel[String(job?.phase || "")] || "Processing";
+      onProgress(`Processing PDF (${progress}%) - ${stage}...`);
+      await wait(1600);
+    }
+
+    throw new Error("PDF OCR is taking too long. Please try again.");
+  };
+
+  const uploadAsset = async (endpoint, asset, options = {}) => {
+    const onProgress =
+      typeof options?.onProgress === "function" ? options.onProgress : () => {};
     const formData = new FormData();
     if (asset.file) {
       formData.append("file", asset.file, asset.name || "upload");
@@ -268,26 +474,66 @@ export default function HomeScreen({ navigation }) {
 
     const controller = new AbortController();
     const sizeBytes = Number(asset?.size || asset?.fileSize || 0);
-    const estimatedTimeoutMs = sizeBytes
+    const baseTimeoutMs = sizeBytes
       ? Math.min(180000, Math.max(30000, 20000 + Math.ceil(sizeBytes / (1024 * 1024)) * 8000))
       : 90000;
-    const timeoutId = setTimeout(() => controller.abort(), estimatedTimeoutMs);
-    const response = await fetch(`${apiBaseUrl}/${endpoint}`, {
-      method: "POST",
-      body: formData,
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({}));
-      const message = payload?.error || `Request failed: ${response.status}`;
-      throw new Error(message);
+    const timeoutMs =
+      endpoint === "pdf"
+        ? Math.max(baseTimeoutMs, 12 * 60 * 1000)
+        : endpoint === "ocr"
+          ? Math.max(baseTimeoutMs, 3 * 60 * 1000)
+          : baseTimeoutMs;
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const apiBaseUrl = await resolveApiBaseUrl();
+      onProgress("Uploading...");
+      const response = await fetch(`${apiBaseUrl}/${endpoint}`, {
+        method: "POST",
+        body: formData,
+        headers: withApiAuthHeaders({
+          "Content-Type": "multipart/form-data",
+        }),
+        signal: controller.signal,
+      });
+      if (endpoint === "pdf" && response.status === 202) {
+        const pending = await response.json().catch(() => ({}));
+        const jobId = String(pending?.jobId || "").trim();
+        if (!jobId) {
+          throw new Error("PDF OCR job could not be started.");
+        }
+        onProgress("Processing PDF (queued)...");
+        return await pollPdfJobUntilDone(apiBaseUrl, jobId, controller.signal, onProgress);
+      }
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        const message = payload?.error || `Request failed: ${response.status}`;
+        throw new Error(message);
+      }
+      const data = await response.json();
+      return {
+        text: String(data?.text || "").trim(),
+        source: String(data?.source || endpoint),
+        truncated: Boolean(data?.truncated),
+        maxChars: Number(data?.maxChars || 0) || MAX_OPEN_CHARS,
+      };
+    } catch (error) {
+      if (isRequestTimeoutError(error)) {
+        if (endpoint === "pdf") {
+          throw new Error(
+            "PDF extraction timed out. Large scanned PDFs can take several minutes. Try again while keeping server and internet active."
+          );
+        }
+        throw new Error("Request timed out. Please retry.");
+      }
+      if (isLikelyExtractionConnectionError(error)) {
+        // Re-discover endpoint on next request if connectivity changed.
+        resolvedApiBaseUrlRef.current = "";
+        throw new Error(extractionUnavailableMessage);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
-    const data = await response.json();
-    return data?.text?.trim() || "";
   };
 
   const runImageOcr = async (asset) => {
@@ -300,13 +546,16 @@ export default function HomeScreen({ navigation }) {
         name: asset.fileName || asset.name || "scan.jpg",
         mimeType: asset.mimeType || "image/jpeg",
       };
-      const text = await uploadAsset("ocr", normalizedAsset);
-      const cleaned = cleanOcrText(text);
-      if (!cleaned) {
-        await showInfo("No text detected", "Try a clearer image.");
-        return;
-      }
-      setInputText(cleaned);
+      const extracted = await uploadAsset("ocr", normalizedAsset, {
+        onProgress: (message) => setStatusMessage(message),
+      });
+      await applyImportedText(extracted.text, {
+        emptyTitle: "No text detected",
+        emptyMessage: "Try a clearer image.",
+        source: extracted.source,
+        truncated: extracted.truncated,
+        maxChars: extracted.maxChars,
+      });
     } catch (error) {
       await showInfo(
         "OCR failed",
@@ -402,7 +651,10 @@ export default function HomeScreen({ navigation }) {
           placeholderTextColor={isDarkTheme ? "#9EA3A8" : "#888"}
           multiline
           value={inputText}
-          onChangeText={setInputText}
+          onChangeText={(value) => {
+            setInputText(value);
+            setLastExtractionMeta(null);
+          }}
           onContentSizeChange={handleContentSizeChange}
         />
         {inputText.trim().length > 0 && (
@@ -416,6 +668,7 @@ export default function HomeScreen({ navigation }) {
             ]}
             onPress={() => {
               setInputText("");
+              setLastExtractionMeta(null);
               setTextInputHeight(120);
             }}
             accessibilityLabel="Clear text"
@@ -551,6 +804,25 @@ export default function HomeScreen({ navigation }) {
             <MaterialIcons name="cloud-upload" size={16} color={statusBannerAccent} />
             <Text style={[styles.uploadStatusText, { color: uiTextColor }, uiFontStyle]}>
               {statusMessage || "Uploading..."}
+            </Text>
+          </View>
+        )}
+        {!!extractionMetaText && !isUploading && (
+          <View
+            style={[
+              styles.extractionMetaBadge,
+              {
+                borderColor: theme.border,
+                backgroundColor: isDarkTheme ? "#1F2228" : "#F7F8FA",
+              },
+            ]}
+          >
+            <MaterialIcons name="verified" size={13} color={statusBannerAccent} />
+            <Text
+              numberOfLines={2}
+              style={[styles.extractionMetaText, { color: uiTextColor }, uiFontStyle]}
+            >
+              {extractionMetaText}
             </Text>
           </View>
         )}
@@ -690,6 +962,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     minHeight: 40,
     justifyContent: "center",
+    gap: 8,
   },
   uploadStatusBanner: {
     flexDirection: "row",
@@ -704,11 +977,31 @@ const styles = StyleSheet.create({
   uploadStatusText: {
     fontSize: 12,
     fontWeight: "600",
+    flex: 1,
+    minWidth: 0,
+    flexShrink: 1,
+    lineHeight: 16,
   },
   uploadStatusDot: {
     width: 8,
     height: 8,
     borderRadius: 99,
+  },
+  extractionMetaBadge: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 7,
+  },
+  extractionMetaText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 11,
+    fontWeight: "600",
+    lineHeight: 15,
   },
   inputActions: {
     flexDirection: "row",
